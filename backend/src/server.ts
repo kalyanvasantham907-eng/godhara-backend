@@ -27,29 +27,36 @@ async function startServer() {
   app.set('trust proxy', 1);
 
   // ── CORS ─────────────────────────────────────────────────────────────────
-  const allowedOrigins = [
-    'https://godhara-fronted.vercel.app',
-    'https://godhara-frontend.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://127.0.0.1:5173',
-  ];
+const allowedOrigins = [
+  'https://godhara.com',
+  'https://www.godhara.com',
+  'https://godhara-fronted.vercel.app',
+  'https://godhara-frontend.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+];
   if (process.env.FRONTEND_URL) allowedOrigins.push(process.env.FRONTEND_URL);
 
   app.use(cors({
-    origin: (origin, cb) => {
-      if (
-        !origin ||
-        allowedOrigins.includes(origin) ||
-        origin.includes('vercel.app') ||
-        origin.includes('localhost')
-      ) {
-        cb(null, true);
-      } else {
-        console.warn(`[CORS] Blocked origin: ${origin}`);
-        cb(new Error('Not allowed by CORS'));
-      }
-    },
+ origin: (origin, cb) => {
+  if (!origin) return cb(null, true);
+
+  if (allowedOrigins.includes(origin)) {
+    return cb(null, true);
+  }
+
+  if (
+    origin.endsWith('.vercel.app') ||
+    origin.startsWith('http://localhost') ||
+    origin.startsWith('http://127.0.0.1')
+  ) {
+    return cb(null, true);
+  }
+
+  console.warn(`[CORS] Blocked origin: ${origin}`);
+  return cb(new Error('Not allowed by CORS'));
+},
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
