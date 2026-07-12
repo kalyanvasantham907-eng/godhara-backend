@@ -179,6 +179,7 @@ export async function ensureSchema() {
         "imagePublicIds" JSONB DEFAULT '[]'::jsonb,
         "isFeatured"     BOOLEAN DEFAULT FALSE,
         "isActive"       BOOLEAN DEFAULT TRUE,
+        "packageSize"    TEXT DEFAULT '',
         weight           REAL,
         "createdAt"      TIMESTAMP NOT NULL DEFAULT NOW(),
         "updatedAt"      TIMESTAMP NOT NULL DEFAULT NOW()
@@ -338,6 +339,8 @@ export async function ensureSchema() {
     // Safe migrations for columns added post-initial-deploy
     await client.query(`
       ALTER TABLE products ADD COLUMN IF NOT EXISTS "imagePublicIds" JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS "packageSize"    TEXT DEFAULT '';
+      UPDATE products SET "packageSize" = '' WHERE "packageSize" IS NULL;
       ALTER TABLE settings ADD COLUMN IF NOT EXISTS "deliveryChargeTelangana" NUMERIC DEFAULT 70;
       ALTER TABLE settings ADD COLUMN IF NOT EXISTS "deliveryChargeAP"        NUMERIC DEFAULT 80;
       ALTER TABLE settings ADD COLUMN IF NOT EXISTS "deliveryChargeOther"     NUMERIC DEFAULT 100;
@@ -515,17 +518,17 @@ export async function pgUpsertProduct(p: any): Promise<void> {
   await pool.query(
     `INSERT INTO products
        (id,name,slug,description,price,"discountPrice",stock,category,images,
-        "imagePublicIds","isFeatured","isActive",weight,"createdAt","updatedAt")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        "imagePublicIds","isFeatured","isActive","packageSize",weight,"createdAt","updatedAt")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      ON CONFLICT (id) DO UPDATE SET
        name=$2, slug=$3, description=$4, price=$5, "discountPrice"=$6,
        stock=$7, category=$8, images=$9, "imagePublicIds"=$10,
-       "isFeatured"=$11, "isActive"=$12, weight=$13, "updatedAt"=$15`,
+       "isFeatured"=$11, "isActive"=$12, "packageSize"=$13, weight=$14, "updatedAt"=$16`,
     [
       p.id, p.name, p.slug, p.description ?? '', p.price, p.discountPrice ?? null,
       p.stock ?? 0, p.category, JSON.stringify(p.images ?? []),
       JSON.stringify(p.imagePublicIds ?? []), !!p.isFeatured, p.isActive !== false,
-      p.weight ?? null, p.createdAt, p.updatedAt,
+      p.packageSize ?? '', p.weight ?? null, p.createdAt, p.updatedAt,
     ]
   );
 }
@@ -726,7 +729,7 @@ function buildSeedData(): any {
         description: 'Made using the sacred ancient Vedic Bilona method from hand-churned curd.',
         price: 1200, discountPrice: 1050, stock: 45, category: 'Dairy Products',
         images: ['https://images.unsplash.com/photo-1589927986089-35812388d1f4?auto=format&fit=crop&q=80&w=600'],
-        imagePublicIds: [], isFeatured: true, isActive: true, weight: 500, createdAt: now, updatedAt: now,
+        imagePublicIds: [], isFeatured: true, isActive: true, packageSize: '500 g', weight: 500, createdAt: now, updatedAt: now,
       },
       {
         id: 'prod-2', name: 'Ganga Jal Ayurvedic Panchagavya Soap',
@@ -734,7 +737,7 @@ function buildSeedData(): any {
         description: 'A traditional skincare bar loaded with five sacred cow offerings.',
         price: 180, discountPrice: 145, stock: 120, category: 'Personal Care',
         images: ['https://images.unsplash.com/photo-1607006342411-9a336340f1a9?auto=format&fit=crop&q=80&w=600'],
-        imagePublicIds: [], isFeatured: true, isActive: true, weight: 125, createdAt: now, updatedAt: now,
+        imagePublicIds: [], isFeatured: true, isActive: true, packageSize: '125 g', weight: 125, createdAt: now, updatedAt: now,
       },
     ],
     orders: [], carts: [],
@@ -984,6 +987,7 @@ export const dbObj = {
     const newProduct = {
       id: `prod-${Date.now()}`, slug, isActive: true, isFeatured: false,
       images: prod.images ?? [], imagePublicIds: prod.imagePublicIds ?? [],
+      packageSize: prod.packageSize ?? '',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       ...prod,
     };
