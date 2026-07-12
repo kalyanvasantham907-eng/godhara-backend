@@ -378,13 +378,13 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       doc.moveTo(MARGIN, cursorY).lineTo(PAGE_WIDTH - MARGIN, cursorY).strokeColor(goldColor).lineWidth(1.2).stroke();
       cursorY += 6;
 
-      // ================= SHIP TO / FROM — single right-aligned column (compact) =================
+    // ================= SHIP TO / FROM — single left-aligned column =================
       const addr = order.shippingAddress || {};
 
       const PADDING_RIGHT = 24;                                   // 20–30pt right page padding
-      const BLOCK_WIDTH = 230;                                    // fixed 220–250pt column width
-      const blockX = PAGE_WIDTH - PADDING_RIGHT - BLOCK_WIDTH;    // same X for both sections
-      const blockRight = PAGE_WIDTH - PADDING_RIGHT;
+      const BLOCK_WIDTH = 230;                                    // fixed 220–240pt column width
+      const blockX = PAGE_WIDTH - PADDING_RIGHT - BLOCK_WIDTH;    // same left edge for both sections
+      const blockRight = blockX + BLOCK_WIDTH;                    // divider matches text container width exactly
 
       let rY = cursorY;
       const blockLine = (
@@ -393,11 +393,11 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       ) => {
         const { font = 'Helvetica', size = 7.5, color = textDark, gap = 9 } = opts;
         doc.font(font).fontSize(size).fillColor(color)
-          .text(text, blockX, rY, { width: BLOCK_WIDTH, align: 'right' });
+          .text(text, blockX, rY, { width: BLOCK_WIDTH, align: 'left' });
         rY += gap;
       };
 
-      // ---- SHIP TO (top-right) ----
+      // ---- SHIP TO ----
       blockLine('SHIP TO', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, gap: 9 });
       doc.moveTo(blockX, rY - 2).lineTo(blockRight, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
       rY += 3;
@@ -408,7 +408,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       blockLine(`${safe(addr.city)}, ${safe(addr.state)}`, { font: 'Helvetica-Bold', size: 8, color: primaryColor, gap: 9 });
       blockLine(`PIN: ${safe(addr.pincode)}`, { font: 'Helvetica-Bold', size: 9, color: primaryColor, gap: 13 });
 
-      // ---- FROM (directly below SHIP TO, same column) ----
+      // ---- FROM (directly below SHIP TO, identical container) ----
       blockLine('FROM', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, gap: 9 });
       doc.moveTo(blockX, rY - 2).lineTo(blockRight, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
       rY += 3;
@@ -416,11 +416,9 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       blockLine('Contact: +91 7661055143', { size: 7.5, gap: 9 });
       blockLine('Email: support@godhara.com', { size: 7.5, gap: 9 });
       blockLine('Website: www.godhara.com', { size: 7.5, gap: 9 });
-      doc.font('Helvetica').fontSize(7).fillColor(textDark).text(
-        '4-3-18, Chaman Gally, Old Banswada, Kamareddy, Telangana - 503187',
-        blockX, rY, { width: BLOCK_WIDTH, align: 'right' }
-      );
-      rY += 13;
+      blockLine('4-3-18, Chaman Gally', { size: 7.5, gap: 9 });
+      blockLine('Old Banswada', { size: 7.5, gap: 9 });
+      blockLine('Kamareddy, Telangana - 503187', { size: 7.5, gap: 9 });
 
       cursorY = rY + 8;
 
