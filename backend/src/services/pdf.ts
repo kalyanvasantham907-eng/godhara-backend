@@ -383,7 +383,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
 
       const PADDING_RIGHT = 0;                                   // 20–30pt right page padding
       const BLOCK_WIDTH = 230;                                    // fixed 220–240pt column width
-      const blockX = PAGE_WIDTH - PADDING_RIGHT - BLOCK_WIDTH+60;    // same left edge for both sections
+      const blockX = PAGE_WIDTH - PADDING_RIGHT - BLOCK_WIDTH+85;    // same left edge for both sections
       const blockRight = blockX + BLOCK_WIDTH;                    // divider matches text container width exactly
 
       let rY = cursorY;
