@@ -417,7 +417,7 @@ export async function sendAdminNewOrderNotificationEmail(order: any, adminEmail:
   const itemsHtml = order.items
     .map(
       (item: any) =>
-        `<li><strong>${item.name}</strong> (Qty: ${item.qty}) - ₹${(item.unitPrice * item.qty).toLocaleString()}</li>`
+        `<li><strong>${item.name}</strong>${item.packageSize ? ` (${item.packageSize})` : ''} (Qty: ${item.qty}) - ₹${(item.unitPrice * item.qty).toLocaleString()}</li>`
     )
     .join('');
 
