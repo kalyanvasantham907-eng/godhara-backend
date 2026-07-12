@@ -392,7 +392,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       ) => {
         const { font = 'Helvetica', size = 8, color = textDark, gap = 11 } = opts;
         doc.font(font).fontSize(size).fillColor(color)
-          .text(text, blockX, rY, { width: BLOCK_WIDTH, align: 'right' });
+          .text(text, blockX, rY, { width: BLOCK_WIDTH, align: 'left' });
         rY += gap;
       };
 
