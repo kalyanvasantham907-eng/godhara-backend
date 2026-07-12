@@ -281,7 +281,7 @@ export async function generateInvoicePDF(order: any): Promise<string> {
 
       // Thank-you strip + tiny credit, pinned to the very bottom of the A5 page
       doc.font('Helvetica-Oblique').fontSize(8).fillColor(primaryColor)
-        .text('Thank you for shopping with Godhara!', LEFT, PAGE_HEIGHT - 38, { width: CONTENT_WIDTH, align: 'center' });
+        .text('Thank you for shopping with Godhara', LEFT, PAGE_HEIGHT - 38, { width: CONTENT_WIDTH, align: 'center' });
       doc.font('Helvetica').fontSize(6).fillColor('#AAAAAA')
         .text('Powering Indian Vedic Traditions. Built by Nexakite.', LEFT, PAGE_HEIGHT - 20, { width: CONTENT_WIDTH, align: 'center' });
 
