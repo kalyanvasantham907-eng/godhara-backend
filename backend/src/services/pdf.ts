@@ -528,10 +528,10 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       // Side-by-side block that fills the remaining space above the footer.
       const sectionTop = cursorY;
 
-      const barcodeWidth = 150;
+      const barcodeWidth = 170;
       const barcodeX = MARGIN;
 
-      const shipBlockX = MARGIN + barcodeWidth + 16;
+      const shipBlockX = MARGIN + barcodeWidth + 20;
       const shipBlockWidth = RIGHT_EDGE - shipBlockX;
 
       // -- SHIP TO / FROM (right column) --
