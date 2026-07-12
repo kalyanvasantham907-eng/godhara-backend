@@ -67,7 +67,15 @@ if (!fs.existsSync(defaultLogoPath)) {
     console.error('[PDF Generator] Failed to initialize default company logo file assets/logo.png:', err);
   }
 }
-// Generate a Tax Invoice PDF
+
+const safe = (val: any, fallback = 'N/A') =>
+  val === undefined || val === null || val === '' ? fallback : val;
+
+// ======================================================================
+// Generate a Tax Invoice PDF — "Studio Salford" style layout
+// Company wordmark top-left. "To" (customer) and "From" (company) blocks
+// both stacked on the RIGHT side, one under the other.
+// ======================================================================
 export async function generateInvoicePDF(order: any): Promise<string> {
   return new Promise((resolve, reject) => {
     try {
@@ -76,112 +84,177 @@ export async function generateInvoicePDF(order: any): Promise<string> {
       const stream = fs.createWriteStream(destPath);
       doc.pipe(stream);
 
+      const PAGE_WIDTH = doc.page.width;
+      const LEFT = 40;
+      const RIGHT = PAGE_WIDTH - 40;
+      const CONTENT_WIDTH = RIGHT - LEFT;
+
       // Colors
-      const primaryColor = '#6B2D0E'; // deep brown
+      const primaryColor = '#6B2D0E';   // deep brown (wordmark / headings)
       const secondaryColor = '#2C1810'; // dark brown text
-      const accentColor = '#E8820C'; // saffron orange
-      const tableHeaderBg = '#F5EFE6'; // cream background
+      const textMuted = '#555555';
+      const tableHeaderBg = '#F5EFE6';  // cream background
+      const ruleColor = '#1A1A1A';      // strong black rule like reference
+      const softRule = '#D4B896';
 
-      // Header Brand Group
-      const logoPath = getCompanyLogoPath();
-      if (logoPath) {
-        doc.image(logoPath, 40, 40, { width: 50 });
-      } else {
-        doc.font('Helvetica-Bold').fontSize(14).fillColor(primaryColor).text('[G]', 48, 48);
-      }
-      doc.font('Helvetica-Bold').fontSize(22).fillColor(primaryColor).text('Godhara', 100, 42);
-      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor).text('Gau Traditional Ayurvedic Products', 100, 64);
-      doc.font('Helvetica').fontSize(8).fillColor('#777777').text('Pocharam Apartment, Banswada, Telangana 503187', 100, 76);
+      const addr = order.shippingAddress || {};
+      const rightColX = 330;            // x-position where To/From blocks start
+      const rightColW = RIGHT - rightColX;
 
-      // Invoice Title
-      doc.font('Helvetica-Bold').fontSize(16).fillColor(primaryColor).text('TAX INVOICE', 430, 42, { align: 'right' });
-      doc.font('Helvetica-Bold').fontSize(10).fillColor(secondaryColor).text(`INVOICE NO: ${order.invoiceNumber || 'INV-' + order.id.replace('GDH-', '')}`, 430, 62, { align: 'right' });
-      doc.font('Helvetica').fontSize(9).fillColor('#555555').text(`Date: ${new Date(order.createdAt).toLocaleDateString()}`, 430, 76, { align: 'right' });
+      // ---------------- HEADER: wordmark left, To/From stacked right ----------------
+      let leftY = 40;
+      doc.font('Helvetica-Bold').fontSize(26).fillColor('#111111').text('+', LEFT, leftY);
+      doc.font('Helvetica-Bold').fontSize(24).fillColor('#111111')
+        .text('Godhara', LEFT + 22, leftY + 2, { width: 200 });
+      doc.font('Helvetica').fontSize(9).fillColor(primaryColor)
+        .text('Gau Traditional Ayurvedic Products', LEFT + 22, leftY + 32, { width: 220 });
 
-      doc.moveTo(40, 105).lineTo(555, 105).strokeColor('#D4B896').lineWidth(1).stroke();
+      // -- "To..." block (customer) --
+      let rY = 40;
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#111111').text('To…', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 13;
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#111111')
+        .text(`Name: ${safe(addr.name)}`, rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 12;
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#111111')
+        .text(`Contact: ${safe(addr.phone)}`, rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 12;
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#111111')
+        .text('Address:', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica').fontSize(8.5).fillColor(secondaryColor)
+        .text(safe(addr.street), rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica').fontSize(8.5).fillColor(secondaryColor)
+        .text(`${safe(addr.city)}, ${safe(addr.state)} - ${safe(addr.pincode)}`, rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica').fontSize(8.5).fillColor(secondaryColor)
+        .text(`Email: ${safe(addr.email)}`, rightColX, rY, { width: rightColW, align: 'right' });
 
-      // Customer Info & Store Info
-      doc.font('Helvetica-Bold').fontSize(10).fillColor(primaryColor).text('BILLED TO:', 40, 115);
-      doc.font('Helvetica-Bold').fontSize(11).fillColor(secondaryColor).text(order.shippingAddress.name, 40, 127);
-      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor).text(order.shippingAddress.street, 40, 140);
-      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor).text(`${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.pincode}`, 40, 152);
-      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor).text(`Phone: ${order.shippingAddress.phone || 'N/A'}`, 40, 164);
-      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor).text(`Email: ${order.shippingAddress.email || 'N/A'}`, 40, 176);
+      rY += 20;
 
-      // Payment Method Info
-      doc.font('Helvetica-Bold').fontSize(10).fillColor(primaryColor).text('PAYMENT DETAILS:', 350, 115);
-      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor).text(`Payment Status: ${order.paymentStatus || 'PAID'}`, 350, 127);
-      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor).text(`Razorpay ID: ${order.razorpayPaymentId || 'N/A'}`, 350, 140);
-      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor).text(`Payment Date: ${order.paymentDate ? new Date(order.paymentDate).toLocaleDateString() : 'N/A'}`, 350, 152);
-      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor).text(`Tracking No: ${order.trackingNumber || 'N/A'}`, 350, 164);
-      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor).text(`Delivery Mode: Gaushala Cargo Logistics`, 350, 176);
+      // -- "From:" block (company) --
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#111111').text('From:', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 13;
+      doc.font('Helvetica-Bold').fontSize(9).fillColor(secondaryColor)
+        .text('Godhara Swadesi Products', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 12;
+      doc.font('Helvetica').fontSize(8.5).fillColor(secondaryColor)
+        .text('CONTACT: +91 7661055143', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica').fontSize(8.5).fillColor(secondaryColor)
+        .text('Address: 4-3-18, Chaman Gally, Old Banswada,', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica').fontSize(8.5).fillColor(secondaryColor)
+        .text('Banswada, Dist: Kamareddy', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica').fontSize(8.5).fillColor(secondaryColor)
+        .text('Pincode: 503187', rightColX, rY, { width: rightColW, align: 'right' });
 
-      // Table Header
-      const tableTop = 205;
-      doc.rect(40, tableTop, 515, 20).fill(tableHeaderBg);
+      // Invoice number / date, placed under the wordmark on the left so nothing
+      // is lost now that To/From own the right column
+      leftY += 60;
+      doc.font('Helvetica-Bold').fontSize(9).fillColor(primaryColor)
+        .text(`INVOICE NO: ${order.invoiceNumber || 'INV-' + String(order.id).replace('GDH-', '')}`, LEFT, leftY);
+      leftY += 12;
+      doc.font('Helvetica').fontSize(8.5).fillColor(textMuted)
+        .text(`Date: ${new Date(order.createdAt).toLocaleDateString()}`, LEFT, leftY);
+      leftY += 12;
+      doc.font('Helvetica').fontSize(8.5).fillColor(textMuted)
+        .text(`Payment Status: ${order.paymentStatus || 'PAID'}`, LEFT, leftY);
 
-      doc.font('Helvetica-Bold').fontSize(9).fillColor(primaryColor);
-      doc.text('S.No', 45, tableTop + 6, { width: 30 });
-      doc.text('Description of Ayurvedic Product', 85, tableTop + 6, { width: 240 });
-      doc.text('Qty', 335, tableTop + 6, { width: 30, align: 'center' });
-      doc.text('Unit Price', 380, tableTop + 6, { width: 70, align: 'right' });
-      doc.text('Total (INR)', 465, tableTop + 6, { width: 85, align: 'right' });
+      const headerBottom = Math.max(rY + 20, leftY + 20);
 
-      // Clean divider line
-      doc.moveTo(40, tableTop + 20).lineTo(555, tableTop + 20).strokeColor('#D4B896').lineWidth(0.5).stroke();
+      // ---------------- TABLE ----------------
+      const tableTop = headerBottom + 15;
+      doc.moveTo(LEFT, tableTop).lineTo(RIGHT, tableTop).strokeColor(ruleColor).lineWidth(1).stroke();
 
-      // Table Items
-      let currentTop = tableTop + 25;
-      order.items.forEach((item: any, i: number) => {
-        // Show Package Size next to the item name when available (falls back gracefully for legacy orders)
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#111111');
+      doc.text('S.No', LEFT + 5, tableTop + 8, { width: 30 });
+      doc.text('Description of Ayurvedic Product', LEFT + 45, tableTop + 8, { width: 240 });
+      doc.text('Qty', LEFT + 300, tableTop + 8, { width: 40, align: 'center' });
+      doc.text('Rate', LEFT + 350, tableTop + 8, { width: 70, align: 'right' });
+      doc.text('Amount', LEFT + 430, tableTop + 8, { width: 85, align: 'right' });
+
+      let currentTop = tableTop + 26;
+      doc.moveTo(LEFT, currentTop - 4).lineTo(RIGHT, currentTop - 4).strokeColor(softRule).lineWidth(0.75).stroke();
+
+      (order.items || []).forEach((item: any, i: number) => {
         const labelText = item.packageSize ? `${item.name} (${item.packageSize})` : item.name;
 
         doc.font('Helvetica').fontSize(9).fillColor(secondaryColor);
-        doc.text((i + 1).toString(), 45, currentTop, { width: 30 });
-        doc.text(labelText, 85, currentTop, { width: 240, height: 16 });
-        doc.text(item.qty.toString(), 335, currentTop, { width: 30, align: 'center' });
-        doc.text(`Rs. ${item.unitPrice.toFixed(2)}`, 380, currentTop, { width: 70, align: 'right' });
-        doc.text(`Rs. ${(item.qty * item.unitPrice).toFixed(2)}`, 465, currentTop, { width: 85, align: 'right' });
+        doc.text((i + 1).toString(), LEFT + 5, currentTop, { width: 30 });
+        doc.text(labelText, LEFT + 45, currentTop, { width: 240, height: 16 });
+        doc.text(item.qty.toString(), LEFT + 300, currentTop, { width: 40, align: 'center' });
+        doc.text(`Rs. ${item.unitPrice.toFixed(2)}`, LEFT + 350, currentTop, { width: 70, align: 'right' });
+        doc.text(`Rs. ${(item.qty * item.unitPrice).toFixed(2)}`, LEFT + 430, currentTop, { width: 85, align: 'right' });
 
-        currentTop += 20;
+        currentTop += 26;
       });
 
-      // Bottom Section Divider
-      doc.moveTo(40, currentTop).lineTo(555, currentTop).strokeColor('#D4B896').lineWidth(0.5).stroke();
-      currentTop += 10;
+      doc.moveTo(LEFT, currentTop).lineTo(RIGHT, currentTop).strokeColor(ruleColor).lineWidth(1).stroke();
+      currentTop += 16;
 
-      // Totals Panel
+      // ---------------- DUE DATE (left) + TOTALS (right) ----------------
+      const totalsTop = currentTop;
+      const dueDate = order.dueDate ? new Date(order.dueDate).toLocaleDateString() : new Date(order.createdAt).toLocaleDateString();
+      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor)
+        .text(`Due Date: ${dueDate}`, LEFT, totalsTop);
+      doc.font('Helvetica').fontSize(8.5).fillColor(textMuted)
+        .text(`Tracking No: ${order.trackingNumber || 'N/A'}`, LEFT, totalsTop + 14);
+      doc.font('Helvetica').fontSize(8.5).fillColor(textMuted)
+        .text(`Razorpay ID: ${order.razorpayPaymentId || 'N/A'}`, LEFT, totalsTop + 28);
+
       const totalLabelX = 350;
       const totalValX = 465;
+      let tY = totalsTop;
 
       doc.font('Helvetica').fontSize(9).fillColor(secondaryColor);
-      doc.text('Subtotal:', totalLabelX, currentTop, { width: 110, align: 'right' });
-      doc.text(`Rs. ${order.subtotal.toFixed(2)}`, totalValX, currentTop, { width: 85, align: 'right' });
+      doc.text('Sub-Total', totalLabelX, tY, { width: 110, align: 'right' });
+      doc.text(`Rs. ${order.subtotal.toFixed(2)}`, totalValX, tY, { width: 85, align: 'right' });
+      tY += 16;
+
+      doc.text('Shipping Charge', totalLabelX, tY, { width: 110, align: 'right' });
+      doc.text(order.shippingCharge === 0 ? 'FREE' : `Rs. ${order.shippingCharge.toFixed(2)}`, totalValX, tY, { width: 85, align: 'right' });
+      tY += 16;
+
+      const gstAmount = order.subtotal * 0.05;
+      doc.text('Tax (GST 5%)', totalLabelX, tY, { width: 110, align: 'right' });
+      doc.text(`Rs. ${gstAmount.toFixed(2)}`, totalValX, tY, { width: 85, align: 'right' });
+      tY += 6;
+
+      doc.moveTo(totalLabelX, tY + 14).lineTo(RIGHT, tY + 14).strokeColor(ruleColor).lineWidth(0.75).stroke();
+      tY += 20;
+
+      doc.font('Helvetica-Bold').fontSize(11).fillColor('#111111');
+      doc.text('Total', totalLabelX, tY, { width: 110, align: 'right' });
+      doc.text(`Rs. ${order.total.toFixed(2)}`, totalValX, tY, { width: 85, align: 'right' });
+
+      currentTop = Math.max(totalsTop + 42, tY) + 50;
+
+      // ---------------- FOOTER: Contact / Payment Info ----------------
+      doc.moveTo(LEFT, currentTop).lineTo(RIGHT, currentTop).strokeColor(softRule).lineWidth(0.5).stroke();
       currentTop += 16;
 
-      doc.text('Shipping Charge:', totalLabelX, currentTop, { width: 110, align: 'right' });
-      doc.text(order.shippingCharge === 0 ? 'FREE' : `Rs. ${order.shippingCharge.toFixed(2)}`, totalValX, currentTop, { width: 85, align: 'right' });
-      currentTop += 16;
+      doc.font('Helvetica-Bold').fontSize(12).fillColor('#111111').text('Contact', LEFT, currentTop);
+      doc.font('Helvetica-Bold').fontSize(12).fillColor('#111111').text('Payment Info', totalLabelX - 10, currentTop);
+      currentTop += 18;
 
-      // GST Line
-      const gstAmount = order.subtotal * 0.05; // 5% GST included
-      doc.text('GST (5% Included):', totalLabelX, currentTop, { width: 110, align: 'right' });
-      doc.text(`Rs. ${gstAmount.toFixed(2)}`, totalValX, currentTop, { width: 85, align: 'right' });
-      currentTop += 20;
+      doc.font('Helvetica').fontSize(9).fillColor(secondaryColor);
+      doc.text('+91 7661055143', LEFT, currentTop);
+      doc.text('Godhara Swadesi Products', totalLabelX - 10, currentTop);
+      currentTop += 13;
+      doc.text('support@godhara.com', LEFT, currentTop);
+      doc.text('Bank: N/A', totalLabelX - 10, currentTop);
+      currentTop += 13;
+      doc.text('4-3-18, Chaman Gally, Banswada, Telangana 503187', LEFT, currentTop, { width: 240 });
+      doc.text(`Payment Date: ${order.paymentDate ? new Date(order.paymentDate).toLocaleDateString() : 'N/A'}`, totalLabelX - 10, currentTop);
 
-      // Grand Total Ring
-      doc.rect(340, currentTop - 2, 215, 20).fill(tableHeaderBg);
-      doc.font('Helvetica-Bold').fontSize(11).fillColor(primaryColor);
-      doc.text('GRAND TOTAL:', totalLabelX, currentTop + 3, { width: 110, align: 'right' });
-      doc.text(`Rs. ${order.total.toFixed(2)}`, totalValX, currentTop + 3, { width: 85, align: 'right' });
-
-      // Traditional Seal Note and Thank You Footer
-      currentTop += 65;
-      doc.font('Helvetica-Oblique').fontSize(10).fillColor(primaryColor).text('Thank you for shopping with Godhara!', 40, currentTop, { align: 'center' });
-      doc.font('Helvetica').fontSize(8).fillColor('#777777').text('Every purchase supports Gaushalas & sustainable organic Indian farming loops.', 40, currentTop + 14, { align: 'center' });
-
-      // Elegant tiny footer credit
-      doc.font('Helvetica').fontSize(7).fillColor('#AAAAAA').text('Powering Indian Vedic Traditions. Built by Nexkite.', 40, doc.page.height - 30, { align: 'center' });
+      // Thank-you strip + tiny credit
+      doc.font('Helvetica-Oblique').fontSize(9.5).fillColor(primaryColor)
+        .text('Thank you for shopping with Godhara!', LEFT, doc.page.height - 60, { width: CONTENT_WIDTH, align: 'center' });
+      doc.font('Helvetica').fontSize(7).fillColor('#AAAAAA')
+        .text('Powering Indian Vedic Traditions. Built by Nexkite.', LEFT, doc.page.height - 30, { width: CONTENT_WIDTH, align: 'center' });
 
       doc.end();
 
@@ -243,9 +316,6 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
         }
       };
 
-      const safe = (val: any, fallback = 'N/A') =>
-        val === undefined || val === null || val === '' ? fallback : val;
-
       let cursorY = MARGIN;
 
       // ================= HEADER =================
@@ -276,49 +346,55 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       doc.moveTo(MARGIN, cursorY).lineTo(PAGE_WIDTH - MARGIN, cursorY).strokeColor(goldColor).lineWidth(1.4).stroke();
       cursorY += 10;
 
-      // ================= TO / FROM BOXES =================
-      const boxGap = 8;
-      const boxWidth = (CONTENT_WIDTH - boxGap) / 2;
-      const boxHeight = 106;
-      const toX = MARGIN;
-      const fromX = MARGIN + boxWidth + boxGap;
-
-      drawRoundedBox(toX, cursorY, boxWidth, boxHeight, creamBg, goldLight, 8);
-      drawRoundedBox(fromX, cursorY, boxWidth, boxHeight, creamBg, goldLight, 8);
-
+      // ================= TO / FROM — stacked on the RIGHT side =================
       const addr = order.shippingAddress || {};
-      let toY = cursorY + 10;
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(goldColor).text('SHIP TO', toX + 10, toY);
-      toY += 12;
-      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(textDark).text(safe(addr.name), toX + 10, toY, { width: boxWidth - 20 });
-      toY += 14;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark).text(`Ph: ${safe(addr.phone)}`, toX + 10, toY, { width: boxWidth - 20 });
-      toY += 11;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark).text(`Email: ${safe(addr.email)}`, toX + 10, toY, { width: boxWidth - 20 });
-      toY += 11;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark).text(safe(addr.street), toX + 10, toY, { width: boxWidth - 20, height: 24 });
-      toY += 22;
-      doc.font('Helvetica-Bold').fontSize(8).fillColor(primaryColor).text(`${safe(addr.city)}, ${safe(addr.state)}`, toX + 10, toY, { width: boxWidth - 20 });
-      toY += 11;
-      doc.font('Helvetica-Bold').fontSize(9).fillColor(primaryColor).text(`PIN: ${safe(addr.pincode)}`, toX + 10, toY, { width: boxWidth - 20 });
+      const rightColX = MARGIN + CONTENT_WIDTH * 0.45;
+      const rightColW = CONTENT_WIDTH - (rightColX - MARGIN);
 
-      let fromY = cursorY + 10;
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(goldColor).text('FROM', fromX + 10, fromY);
-      fromY += 12;
-      doc.font('Helvetica-Bold').fontSize(10).fillColor(textDark).text('Godhara Swadesi Products', fromX + 10, fromY, { width: boxWidth - 20 });
-      fromY += 14;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark).text('Contact: +91 7661055143', fromX + 10, fromY, { width: boxWidth - 20 });
-      fromY += 11;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark).text('Email: support@godhara.com', fromX + 10, fromY, { width: boxWidth - 20 });
-      fromY += 11;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark).text('Website: www.godhara.com', fromX + 10, fromY, { width: boxWidth - 20 });
-      fromY += 11;
+      let rY = cursorY;
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(goldColor)
+        .text('SHIP TO', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 12;
+      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(textDark)
+        .text(safe(addr.name), rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 14;
+      doc.font('Helvetica').fontSize(8).fillColor(textDark)
+        .text(`Ph: ${safe(addr.phone)}`, rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica').fontSize(8).fillColor(textDark)
+        .text(`Email: ${safe(addr.email)}`, rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica').fontSize(8).fillColor(textDark)
+        .text(safe(addr.street), rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 22;
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(primaryColor)
+        .text(`${safe(addr.city)}, ${safe(addr.state)}`, rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica-Bold').fontSize(9).fillColor(primaryColor)
+        .text(`PIN: ${safe(addr.pincode)}`, rightColX, rY, { width: rightColW, align: 'right' });
+
+      rY += 18;
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(goldColor)
+        .text('FROM', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 12;
+      doc.font('Helvetica-Bold').fontSize(10).fillColor(textDark)
+        .text('Godhara Swadesi Products', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 14;
+      doc.font('Helvetica').fontSize(8).fillColor(textDark)
+        .text('Contact: +91 7661055143', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica').fontSize(8).fillColor(textDark)
+        .text('Email: support@godhara.com', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
+      doc.font('Helvetica').fontSize(8).fillColor(textDark)
+        .text('Website: www.godhara.com', rightColX, rY, { width: rightColW, align: 'right' });
+      rY += 11;
       doc.font('Helvetica').fontSize(7.5).fillColor(textDark).text(
         '4-3-18, Chaman Gally, Old Banswada, Kamareddy, Telangana - 503187',
-        fromX + 10, fromY, { width: boxWidth - 20, height: 26 }
+        rightColX, rY, { width: rightColW, align: 'right' }
       );
 
-      cursorY += boxHeight + 14;
+      cursorY = rY + 26;
 
       // ================= PRODUCT TABLE =================
       const colDescX = MARGIN;
@@ -332,7 +408,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
 
       const tableHeaderHeight = 20;
       const rowHeight = 18;
-      const footerReserveHeight = 210; // space reserved for summary + order details + barcode + footer
+      const footerReserveHeight = 210;
 
       const drawTableHeader = (y: number) => {
         drawRoundedBox(MARGIN, y, CONTENT_WIDTH, tableHeaderHeight, primaryColor, undefined, 4);
@@ -348,7 +424,6 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
 
       const items = Array.isArray(order.items) ? order.items : [];
       items.forEach((item: any, i: number) => {
-        // Page-break guard: start a fresh table if running out of room
         if (cursorY + rowHeight > PAGE_HEIGHT - footerReserveHeight) {
           doc.addPage({ size: [PAGE_WIDTH, PAGE_HEIGHT], margin: MARGIN });
           cursorY = MARGIN;
@@ -377,7 +452,6 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
 
       cursorY += 10;
 
-      // If summary won't fit, push to a new page
       if (cursorY + footerReserveHeight - 20 > PAGE_HEIGHT) {
         doc.addPage({ size: [PAGE_WIDTH, PAGE_HEIGHT], margin: MARGIN });
         cursorY = MARGIN;
