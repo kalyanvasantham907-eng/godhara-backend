@@ -531,7 +531,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       const barcodeWidth = 170;
       const barcodeX = MARGIN;
 
-      const shipBlockX = MARGIN + barcodeWidth + 40;
+      const shipBlockX = MARGIN + barcodeWidth + 85;
       const shipBlockWidth = RIGHT_EDGE - shipBlockX;
 
       // -- SHIP TO / FROM (right column) --
