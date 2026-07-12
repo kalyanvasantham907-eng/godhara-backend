@@ -2185,10 +2185,10 @@ apiRouter.post('/admin/upload', authenticateToken, requireAdmin, async (req, res
 
 // PRODUCT MANAGEMENT: CRUD OPERATIONS
 apiRouter.post('/admin/products', authenticateToken, requireAdmin, (req, res) => {
-  const { name, description, price, discountPrice, stock, category, weight, images, imagePublicIds, isFeatured } = req.body;
+  const { name, description, price, discountPrice, stock, category, packageSize, weight, images, imagePublicIds, isFeatured } = req.body;
 
-  if (!name || !price || stock === undefined || !category || !weight) {
-    return res.status(400).json({ message: 'Name, price, stock, category, and weight parameters are required' });
+  if (!name || !price || stock === undefined || !category || !packageSize) {
+    return res.status(400).json({ message: 'Name, price, stock, category, and package size parameters are required' });
   }
 
   console.log(`[Product API] CREATING product. Name: "${name}". Images:`, images);
@@ -2200,7 +2200,9 @@ apiRouter.post('/admin/products', authenticateToken, requireAdmin, (req, res) =>
     discountPrice: discountPrice ? parseFloat(discountPrice) : undefined,
     stock: parseInt(stock),
     category,
-    weight: parseInt(weight),
+    packageSize: String(packageSize).trim(),
+    // Legacy logistics-only field: no longer collected from the admin form, kept optional for backward compatibility.
+    weight: weight !== undefined && weight !== '' ? parseInt(weight) : undefined,
     images: images || [],
     imagePublicIds: imagePublicIds || [],
     isFeatured: !!isFeatured
@@ -2250,6 +2252,8 @@ apiRouter.put('/admin/products/:id', authenticateToken, requireAdmin, async (req
   if (updates.price) updates.price = parseFloat(updates.price);
   if (updates.discountPrice) updates.discountPrice = parseFloat(updates.discountPrice);
   if (updates.stock !== undefined) updates.stock = parseInt(updates.stock);
+  if (updates.packageSize !== undefined) updates.packageSize = String(updates.packageSize).trim();
+  // Legacy logistics-only field: still accepted for backward compatibility if ever sent.
   if (updates.weight) updates.weight = parseInt(updates.weight);
 
   const updated = dbObj.updateProduct(req.params.id, updates);
