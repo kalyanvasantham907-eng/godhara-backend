@@ -295,7 +295,17 @@ export async function generateInvoicePDF(order: any): Promise<string> {
   });
 }
 
-// Generate a Premium A5 Shipping Label + Invoice PDF
+// ======================================================================
+// Generate a Premium A5 Shipping Label PDF
+//
+// Layout order (top → bottom), matching the reference design:
+//   1. Header      — logo/wordmark left, "SHIPPING LABEL" + meta right
+//   2. Item table   — Description / Qty / Unit Price / Amount
+//   3. Summary      — Subtotal / Shipping / GST / Grand Total bar
+//   4. Details box  — Payment status, tracking no, weight, etc.
+//   5. Barcode (left) + SHIP TO / FROM (right), side by side
+//   6. Footer       — thank-you note, support info, address, credit
+// ======================================================================
 export async function generateShippingLabelPDF(order: any): Promise<string> {
   return new Promise(async (resolve, reject) => {
     try {
@@ -306,6 +316,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       const PAGE_HEIGHT = 595.28;
       const MARGIN = 24;
       const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+      const RIGHT_EDGE = PAGE_WIDTH - MARGIN;
 
       // Single-page guarantee: this document is never paginated, so no
       // addPage() call exists anywhere below — every section is sized and
@@ -318,7 +329,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       const stream = fs.createWriteStream(destPath);
       doc.pipe(stream);
 
-      // ---------- Theme: Brown + Gold, Modern Luxury (unchanged) ----------
+      // ---------- Theme: Brown + Gold, Modern Luxury ----------
       const primaryColor = '#5C2A0E';      // deep brown
       const goldColor = '#C9973E';         // gold accent
       const goldLight = '#E7C77A';         // light gold border
@@ -349,7 +360,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
 
       let cursorY = MARGIN;
 
-      // ================= HEADER (compact) =================
+      // ================= 1. HEADER (compact) =================
       const logoSize = 30;
       const logoPath = getCompanyLogoPath();
       if (logoPath) {
@@ -378,51 +389,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       doc.moveTo(MARGIN, cursorY).lineTo(PAGE_WIDTH - MARGIN, cursorY).strokeColor(goldColor).lineWidth(1.2).stroke();
       cursorY += 6;
 
-    // ================= SHIP TO / FROM — single left-aligned column =================
-      const addr = order.shippingAddress || {};
-
-      const PADDING_RIGHT = 0;                                   // 20–30pt right page padding
-      const BLOCK_WIDTH = 230;                                    // fixed 220–240pt column width
-      const blockX = PAGE_WIDTH - PADDING_RIGHT - BLOCK_WIDTH+85;    // same left edge for both sections
-      const blockRight = blockX + BLOCK_WIDTH;                    // divider matches text container width exactly
-
-      let rY = cursorY;
-      const blockLine = (
-        text: string,
-        opts: { font?: string; size?: number; color?: string; gap?: number } = {}
-      ) => {
-        const { font = 'Helvetica', size = 7.5, color = textDark, gap = 9 } = opts;
-        doc.font(font).fontSize(size).fillColor(color)
-          .text(text, blockX, rY, { width: BLOCK_WIDTH, align: 'left' });
-        rY += gap;
-      };
-
-      // ---- SHIP TO ----
-      blockLine('SHIP TO', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, gap: 9 });
-      doc.moveTo(blockX, rY - 2).lineTo(blockRight, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
-      rY += 3;
-      blockLine(safe(addr.name), { font: 'Helvetica-Bold', size: 10, color: textDark, gap: 11 });
-      blockLine(`Ph: ${safe(addr.phone)}`, { size: 7.5, gap: 9 });
-      blockLine(`Email: ${safe(addr.email)}`, { size: 7.5, gap: 9 });
-      blockLine(safe(addr.street), { size: 7.5, gap: 9 });
-      blockLine(`${safe(addr.city)}, ${safe(addr.state)}`, { font: 'Helvetica-Bold', size: 8, color: primaryColor, gap: 9 });
-      blockLine(`PIN: ${safe(addr.pincode)}`, { font: 'Helvetica-Bold', size: 9, color: primaryColor, gap: 13 });
-
-      // ---- FROM (directly below SHIP TO, identical container) ----
-      blockLine('FROM', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, gap: 9 });
-      doc.moveTo(blockX, rY - 2).lineTo(blockRight, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
-      rY += 3;
-      blockLine('Godhara Swadesi Products', { font: 'Helvetica-Bold', size: 9, color: textDark, gap: 11 });
-      blockLine('Contact: +91 7661055143', { size: 7.5, gap: 9 });
-      blockLine('Email: support@godhara.com', { size: 7.5, gap: 9 });
-      blockLine('Website: www.godhara.com', { size: 7.5, gap: 9 });
-      blockLine('4-3-18, Chaman Gally', { size: 7.5, gap: 9 });
-      blockLine('Old Banswada', { size: 7.5, gap: 9 });
-      blockLine('Kamareddy, Telangana - 503187', { size: 7.5, gap: 9 });
-
-      cursorY = rY + 8;
-
-      // ================= PRODUCT TABLE (capped rows, compact) =================
+      // ================= 2. PRODUCT TABLE (capped rows, compact) =================
       const colDescX = MARGIN;
       const colQtyX = MARGIN + 190;
       const colPriceX = MARGIN + 235;
@@ -484,7 +451,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
 
       cursorY += 6;
 
-      // ================= SUMMARY (compact) =================
+      // ================= 3. SUMMARY (compact) =================
       const subtotal = Number(order.subtotal || 0);
       const shippingCharge = Number(order.shippingCharge || 0);
       const gstAmount = order.gstAmount !== undefined ? Number(order.gstAmount) : subtotal * 0.05;
@@ -515,7 +482,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
         .text(rupee(grandTotal), MARGIN + summaryLabelW, cursorY + 5, { width: summaryValW - 9, align: 'right' });
       cursorY += totalBoxHeight + 10;
 
-      // ================= ORDER DETAILS GRID (compact) =================
+      // ================= 4. ORDER DETAILS GRID (compact) =================
       const totalWeight = allItems.reduce((acc: number, item: any) => acc + (Number(item.weight) || 250) * Number(item.qty || 0), 0);
       const totalQty = allItems.reduce((acc: number, item: any) => acc + Number(item.qty || 0), 0);
       const trackingNo = order.trackingNumber || `TRK-GDH-${String(order.id || '').slice(0, 8).toUpperCase()}`;
@@ -545,9 +512,9 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       doc.text(`Dispatch: ${new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN')}`, detColLeftX, detY, { width: detColW });
       doc.text(`Delivery: Gaushala Cargo Logistics`, detColRightX, detY, { width: detColW });
 
-      cursorY += detailsBoxHeight + 8;
+      cursorY += detailsBoxHeight + 14;
 
-      // ================= FOOTER — anchored to the bottom of the page =================
+      // ================= FOOTER geometry (anchored to bottom of page) =================
       // The footer's height never changes, so it's positioned from the
       // bottom of the page upward. This guarantees it always lands on
       // the same A5 sheet no matter how tall the content above is.
@@ -557,30 +524,75 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       const thankYouY = supportY - 13;
       const footerDividerY = thankYouY - 8;
 
-      // ================= BARCODE — fills whatever space remains, shrinking =================
-      // instead of ever pushing content to a second page.
+      // ================= 5. BARCODE (left) + SHIP TO / FROM (right) =================
+      // Side-by-side block that fills the remaining space above the footer.
+      const sectionTop = cursorY;
+
+      const barcodeWidth = 150;
+      const barcodeX = MARGIN;
+
+      const shipBlockX = MARGIN + barcodeWidth + 16;
+      const shipBlockWidth = RIGHT_EDGE - shipBlockX;
+
+      // -- SHIP TO / FROM (right column) --
+      const addr = order.shippingAddress || {};
+      let rY = sectionTop;
+      const blockLine = (
+        text: string,
+        opts: { font?: string; size?: number; color?: string; gap?: number } = {}
+      ) => {
+        const { font = 'Helvetica', size = 7.5, color = textDark, gap = 9 } = opts;
+        doc.font(font).fontSize(size).fillColor(color)
+          .text(text, shipBlockX, rY, { width: shipBlockWidth, align: 'left' });
+        rY += gap;
+      };
+
+      blockLine('SHIP TO', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, gap: 9 });
+      doc.moveTo(shipBlockX, rY - 2).lineTo(RIGHT_EDGE, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
+      rY += 3;
+      blockLine(safe(addr.name), { font: 'Helvetica-Bold', size: 10, color: textDark, gap: 11 });
+      blockLine(`Ph: ${safe(addr.phone)}`, { size: 7.5, gap: 9 });
+      blockLine(`Email: ${safe(addr.email)}`, { size: 7.5, gap: 9 });
+      blockLine(safe(addr.street), { size: 7.5, gap: 9 });
+      blockLine(`${safe(addr.city)}, ${safe(addr.state)}`, { font: 'Helvetica-Bold', size: 8, color: primaryColor, gap: 9 });
+      blockLine(`PIN: ${safe(addr.pincode)}`, { font: 'Helvetica-Bold', size: 9, color: primaryColor, gap: 13 });
+
+      rY += 4;
+      blockLine('FROM', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, gap: 9 });
+      doc.moveTo(shipBlockX, rY - 2).lineTo(RIGHT_EDGE, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
+      rY += 3;
+      blockLine('Godhara Swadesi Products', { font: 'Helvetica-Bold', size: 9, color: textDark, gap: 11 });
+      blockLine('Contact: +91 7661055143', { size: 7.5, gap: 9 });
+      blockLine('Email: support@godhara.com', { size: 7.5, gap: 9 });
+      blockLine('Website: www.godhara.com', { size: 7.5, gap: 9 });
+      blockLine('4-3-18, Chaman Gally', { size: 7.5, gap: 9 });
+      blockLine('Old Banswada', { size: 7.5, gap: 9 });
+      blockLine('Kamareddy, Telangana - 503187', { size: 7.5, gap: 9 });
+
+      const shipBlockBottom = rY;
+
+      // -- Barcode (left column), sized to sit near the top of the shipping block --
       const barcodeIdGap = 4;
       const barcodeIdHeight = 10;
-      const gapBeforeFooter = 6;
-      const spaceForBarcode = footerDividerY - gapBeforeFooter - cursorY;
-      const barcodeHeight = Math.max(20, Math.min(38, spaceForBarcode - barcodeIdGap - barcodeIdHeight));
-
-      const barcodeWidth = 200;
-      const barcodeX = (PAGE_WIDTH - barcodeWidth) / 2;
+      const barcodeHeight = 60;
 
       try {
         const barcodeBuffer = await generateBarcodeBuffer(order.id);
-        doc.image(barcodeBuffer, barcodeX, cursorY, { width: barcodeWidth, height: barcodeHeight });
+        doc.image(barcodeBuffer, barcodeX, sectionTop, { width: barcodeWidth, height: barcodeHeight });
         doc.font('Helvetica-Bold').fontSize(8).fillColor(textDark)
-          .text(safe(order.id), MARGIN, cursorY + barcodeHeight + barcodeIdGap, { width: CONTENT_WIDTH, align: 'center' });
+          .text(safe(order.id), barcodeX, sectionTop + barcodeHeight + barcodeIdGap, { width: barcodeWidth, align: 'center' });
       } catch (err) {
         console.error('Failed to generate label barcode:', err);
-        drawRoundedBox(barcodeX, cursorY, barcodeWidth, barcodeHeight, undefined as any, goldColor, 4);
+        drawRoundedBox(barcodeX, sectionTop, barcodeWidth, barcodeHeight, undefined as any, goldColor, 4);
         doc.font('Helvetica-Bold').fontSize(8).fillColor(primaryColor)
-          .text(`ORDER REF: ${safe(order.id)}`, MARGIN, cursorY + barcodeHeight / 2 - 4, { width: CONTENT_WIDTH, align: 'center' });
+          .text(`ORDER REF: ${safe(order.id)}`, barcodeX, sectionTop + barcodeHeight / 2 - 4, { width: barcodeWidth, align: 'center' });
       }
 
-      // ================= FOOTER content (fixed bottom position) =================
+      const barcodeBlockBottom = sectionTop + barcodeHeight + barcodeIdGap + barcodeIdHeight;
+
+      cursorY = Math.max(shipBlockBottom, barcodeBlockBottom) + 6;
+
+      // ================= 6. FOOTER content (fixed bottom position) =================
       doc.moveTo(MARGIN, footerDividerY).lineTo(PAGE_WIDTH - MARGIN, footerDividerY).strokeColor(goldLight).lineWidth(0.75).stroke();
 
       doc.font('Helvetica-Oblique').fontSize(8.5).fillColor(primaryColor)
