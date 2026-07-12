@@ -375,55 +375,55 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       doc.moveTo(MARGIN, cursorY).lineTo(PAGE_WIDTH - MARGIN, cursorY).strokeColor(goldColor).lineWidth(1.4).stroke();
       cursorY += 10;
 
-      // ================= TO / FROM — stacked on the RIGHT side =================
+      // ================= SHIP TO / FROM — single right-aligned column =================
+      // Both sections share one fixed-width column pinned to a consistent
+      // right-hand page margin, so every line — labels, names, addresses —
+      // terminates flush against the same right edge.
       const addr = order.shippingAddress || {};
-      const rightColX = MARGIN + CONTENT_WIDTH * 0.45;
-      const rightColW = CONTENT_WIDTH - (rightColX - MARGIN);
+
+      const PADDING_RIGHT = 24;                                   // 20–30pt right page padding
+      const BLOCK_WIDTH = 230;                                    // fixed 220–250pt column width
+      const blockX = PAGE_WIDTH - PADDING_RIGHT - BLOCK_WIDTH;    // same X for both sections
+      const blockRight = PAGE_WIDTH - PADDING_RIGHT;
+
+      const blockLine = (
+        text: string,
+        opts: { font?: string; size?: number; color?: string; gap?: number } = {}
+      ) => {
+        const { font = 'Helvetica', size = 8, color = textDark, gap = 11 } = opts;
+        doc.font(font).fontSize(size).fillColor(color)
+          .text(text, blockX, rY, { width: BLOCK_WIDTH, align: 'right' });
+        rY += gap;
+      };
 
       let rY = cursorY;
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(goldColor)
-        .text('SHIP TO', rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 12;
-      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(textDark)
-        .text(safe(addr.name), rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 14;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark)
-        .text(`Ph: ${safe(addr.phone)}`, rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 11;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark)
-        .text(`Email: ${safe(addr.email)}`, rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 11;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark)
-        .text(safe(addr.street), rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 22;
-      doc.font('Helvetica-Bold').fontSize(8).fillColor(primaryColor)
-        .text(`${safe(addr.city)}, ${safe(addr.state)}`, rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 11;
-      doc.font('Helvetica-Bold').fontSize(9).fillColor(primaryColor)
-        .text(`PIN: ${safe(addr.pincode)}`, rightColX, rY, { width: rightColW, align: 'right' });
 
-      rY += 18;
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(goldColor)
-        .text('FROM', rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 12;
-      doc.font('Helvetica-Bold').fontSize(10).fillColor(textDark)
-        .text('Godhara Swadesi Products', rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 14;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark)
-        .text('Contact: +91 7661055143', rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 11;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark)
-        .text('Email: support@godhara.com', rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 11;
-      doc.font('Helvetica').fontSize(8).fillColor(textDark)
-        .text('Website: www.godhara.com', rightColX, rY, { width: rightColW, align: 'right' });
-      rY += 11;
+      // ---- SHIP TO (top-right) ----
+      blockLine('SHIP TO', { font: 'Helvetica-Bold', size: 8, color: goldColor, gap: 11 });
+      doc.moveTo(blockX, rY - 2).lineTo(blockRight, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
+      rY += 4;
+      blockLine(safe(addr.name), { font: 'Helvetica-Bold', size: 11, color: textDark, gap: 14 });
+      blockLine(`Ph: ${safe(addr.phone)}`, { size: 8 });
+      blockLine(`Email: ${safe(addr.email)}`, { size: 8 });
+      blockLine(safe(addr.street), { size: 8 });
+      blockLine(`${safe(addr.city)}, ${safe(addr.state)}`, { font: 'Helvetica-Bold', size: 8.5, color: primaryColor });
+      blockLine(`PIN: ${safe(addr.pincode)}`, { font: 'Helvetica-Bold', size: 9.5, color: primaryColor, gap: 22 });
+
+      // ---- FROM (directly below SHIP TO, same column) ----
+      blockLine('FROM', { font: 'Helvetica-Bold', size: 8, color: goldColor, gap: 11 });
+      doc.moveTo(blockX, rY - 2).lineTo(blockRight, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
+      rY += 4;
+      blockLine('Godhara Swadesi Products', { font: 'Helvetica-Bold', size: 10, color: textDark, gap: 14 });
+      blockLine('Contact: +91 7661055143', { size: 8 });
+      blockLine('Email: support@godhara.com', { size: 8 });
+      blockLine('Website: www.godhara.com', { size: 8 });
       doc.font('Helvetica').fontSize(7.5).fillColor(textDark).text(
         '4-3-18, Chaman Gally, Old Banswada, Kamareddy, Telangana - 503187',
-        rightColX, rY, { width: rightColW, align: 'right' }
+        blockX, rY, { width: BLOCK_WIDTH, align: 'right' }
       );
+      rY += 22;
 
-      cursorY = rY + 26;
+      cursorY = rY + 10;
 
       // ================= PRODUCT TABLE =================
       const colDescX = MARGIN;
