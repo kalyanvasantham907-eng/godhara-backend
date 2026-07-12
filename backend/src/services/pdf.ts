@@ -283,7 +283,7 @@ export async function generateInvoicePDF(order: any): Promise<string> {
       doc.font('Helvetica-Oblique').fontSize(8).fillColor(primaryColor)
         .text('Thank you for shopping with Godhara!', LEFT, PAGE_HEIGHT - 38, { width: CONTENT_WIDTH, align: 'center' });
       doc.font('Helvetica').fontSize(6).fillColor('#AAAAAA')
-        .text('Powering Indian Vedic Traditions. Built by Nexkite.', LEFT, PAGE_HEIGHT - 20, { width: CONTENT_WIDTH, align: 'center' });
+        .text('Powering Indian Vedic Traditions. Built by Nexakite.', LEFT, PAGE_HEIGHT - 20, { width: CONTENT_WIDTH, align: 'center' });
 
       doc.end();
 
