@@ -381,7 +381,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
     // ================= SHIP TO / FROM — single left-aligned column =================
       const addr = order.shippingAddress || {};
 
-      const PADDING_RIGHT = 8;                                   // 20–30pt right page padding
+      const PADDING_RIGHT = 0;                                   // 20–30pt right page padding
       const BLOCK_WIDTH = 230;                                    // fixed 220–240pt column width
       const blockX = PAGE_WIDTH - PADDING_RIGHT - BLOCK_WIDTH;    // same left edge for both sections
       const blockRight = blockX + BLOCK_WIDTH;                    // divider matches text container width exactly
