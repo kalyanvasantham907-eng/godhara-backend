@@ -140,7 +140,7 @@ export async function generateInvoicePDF(order: any): Promise<string> {
 
       rY += 6;
       rightLine('From:', { bold: true, size: 8, color: '#111111', gap: 11 });
-      rightLine('Godhara Swadesi Products', { bold: true, size: 7.3 });
+      rightLine('Godhara ', { bold: true, size: 7.3 });
       rightLine('Contact: +91 7661055143', { size: 6.8 });
       rightLine('4-3-18, Chaman Gally, Old Banswada,', { size: 6.8 });
       rightLine('Banswada, Dist: Kamareddy - 503187', { size: 6.8 });
