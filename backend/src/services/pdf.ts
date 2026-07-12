@@ -561,7 +561,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       blockLine('FROM', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, gap: 9 });
       doc.moveTo(shipBlockX, rY - 2).lineTo(RIGHT_EDGE, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
       rY += 3;
-      blockLine('Godhara Swadesi Products', { font: 'Helvetica-Bold', size: 9, color: textDark, gap: 11 });
+      blockLine('Godhara  Products', { font: 'Helvetica-Bold', size: 9, color: textDark, gap: 11 });
       blockLine('Contact: +91 7661055143', { size: 7.5, gap: 9 });
       blockLine('Email: support@godhara.com', { size: 7.5, gap: 9 });
       blockLine('Website: www.godhara.com', { size: 7.5, gap: 9 });
