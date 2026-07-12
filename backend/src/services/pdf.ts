@@ -133,8 +133,8 @@ export async function generateInvoicePDF(order: any): Promise<string> {
       // Table Items
       let currentTop = tableTop + 25;
       order.items.forEach((item: any, i: number) => {
-        // Safe check for item weight/grams if present
-        const labelText = item.weight ? `${item.name} (${item.weight}g)` : item.name;
+        // Show Package Size next to the item name when available (falls back gracefully for legacy orders)
+        const labelText = item.packageSize ? `${item.name} (${item.packageSize})` : item.name;
 
         doc.font('Helvetica').fontSize(9).fillColor(secondaryColor);
         doc.text((i + 1).toString(), 45, currentTop, { width: 30 });
@@ -359,7 +359,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
           doc.rect(MARGIN, cursorY, CONTENT_WIDTH, rowHeight).fill(rowAltBg);
         }
 
-        const labelText = item.weight ? `${item.name} (${item.weight}g)` : item.name;
+        const labelText = item.packageSize ? `${item.name} (${item.packageSize})` : item.name;
         const qty = Number(item.qty || 0);
         const unitPrice = Number(item.unitPrice || 0);
 
