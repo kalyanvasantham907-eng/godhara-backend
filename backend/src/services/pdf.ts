@@ -596,7 +596,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       doc.moveTo(MARGIN, footerDividerY).lineTo(PAGE_WIDTH - MARGIN, footerDividerY).strokeColor(goldLight).lineWidth(0.75).stroke();
 
       doc.font('Helvetica-Oblique').fontSize(8.5).fillColor(primaryColor)
-        .text('Thank you for shopping with Godhara ❤️', MARGIN, thankYouY, { width: CONTENT_WIDTH, align: 'center' });
+        .text('Thank you for shopping with Godhara ', MARGIN, thankYouY, { width: CONTENT_WIDTH, align: 'center' });
 
       doc.font('Helvetica').fontSize(6.5).fillColor(textMuted)
         .text('Customer Support: +91 7661055143  |  support@godhara.com', MARGIN, supportY, { width: CONTENT_WIDTH, align: 'center' });
