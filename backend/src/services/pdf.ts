@@ -374,7 +374,7 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
         .text(`Invoice No: ${safe(order.invoiceNumber || (order.id ? 'INV-' + String(order.id).replace('GDH-', '') : undefined))}`, MARGIN, metaTop + 8, { width: CONTENT_WIDTH, align: 'right' })
         .text(`Dispatch Date: ${new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN')}`, MARGIN, metaTop + 16, { width: CONTENT_WIDTH, align: 'right' });
 
-      cursorY += 36;
+      cursorY += 40;
       doc.moveTo(MARGIN, cursorY).lineTo(PAGE_WIDTH - MARGIN, cursorY).strokeColor(goldColor).lineWidth(1.2).stroke();
       cursorY += 6;
 
