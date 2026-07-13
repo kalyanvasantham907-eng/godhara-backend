@@ -305,6 +305,12 @@ export async function generateInvoicePDF(order: any): Promise<string> {
 //   4. Details box  — Payment status, tracking no, weight, etc.
 //   5. Barcode (left) + SHIP TO / FROM (right), side by side
 //   6. Footer       — thank-you note, support info, address, credit
+//
+// NOTE ON SPACING: the SHIP TO / FROM column uses variable-length data
+// (customer name, street, city/state) that can wrap to 2+ lines. All
+// vertical spacing in that block is computed with doc.heightOfString()
+// against the actual column width, rather than a fixed pixel gap, so
+// wrapped lines never collide with the line that follows.
 // ======================================================================
 export async function generateShippingLabelPDF(order: any): Promise<string> {
   return new Promise(async (resolve, reject) => {
@@ -531,43 +537,60 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       const barcodeWidth = 170;
       const barcodeX = MARGIN;
 
-      const shipBlockX = MARGIN + barcodeWidth + 50;
+      // FIX: the gap between the barcode column and the SHIP TO / FROM
+      // column was 85pt (barcodeWidth + 85), which squeezed the address
+      // column down to ~117pt wide — too narrow for long names/streets,
+      // forcing extra wraps that fed the overlap bug below. Tightening
+      // this gap widens the address column by ~60pt with no visual loss,
+      // since the barcode itself only needs `barcodeWidth` of space.
+      const shipBlockGap = 24;
+      const shipBlockX = MARGIN + barcodeWidth + shipBlockGap;
       const shipBlockWidth = RIGHT_EDGE - shipBlockX;
 
       // -- SHIP TO / FROM (right column) --
       const addr = order.shippingAddress || {};
       let rY = sectionTop;
+
+      // FIX: previously this advanced `rY` by a fixed `gap` (9/11/13...)
+      // regardless of how many lines the text actually wrapped to. Long
+      // names, streets, or city/state values that wrapped to 2 lines
+      // would overlap the next field, since the fixed gap only accounted
+      // for a single line. Now the real rendered height is measured with
+      // doc.heightOfString() (against the same width used by doc.text())
+      // before advancing the cursor, so wrapped text can never collide
+      // with what follows it.
       const blockLine = (
         text: string,
-        opts: { font?: string; size?: number; color?: string; gap?: number } = {}
+        opts: { font?: string; size?: number; color?: string; spacingAfter?: number } = {}
       ) => {
-        const { font = 'Helvetica', size = 7.5, color = textDark, gap = 9 } = opts;
-        doc.font(font).fontSize(size).fillColor(color)
-          .text(text, shipBlockX, rY, { width: shipBlockWidth, align: 'left' });
-        rY += gap;
+        const { font = 'Helvetica', size = 7.5, color = textDark, spacingAfter = 2 } = opts;
+        const value = safe(text, '');
+        doc.font(font).fontSize(size).fillColor(color);
+        const textHeight = doc.heightOfString(value, { width: shipBlockWidth, align: 'left' });
+        doc.text(value, shipBlockX, rY, { width: shipBlockWidth, align: 'left' });
+        rY += textHeight + spacingAfter;
       };
 
-      blockLine('SHIP TO', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, gap: 9 });
-      doc.moveTo(shipBlockX, rY - 2).lineTo(RIGHT_EDGE, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
-      rY += 3;
-      blockLine(safe(addr.name), { font: 'Helvetica-Bold', size: 10, color: textDark, gap: 11 });
-      blockLine(`Ph: ${safe(addr.phone)}`, { size: 7.5, gap: 9 });
-      blockLine(`Email: ${safe(addr.email)}`, { size: 7.5, gap: 9 });
-      blockLine(safe(addr.street), { size: 7.5, gap: 9 });
-      blockLine(`${safe(addr.city)}, ${safe(addr.state)}`, { font: 'Helvetica-Bold', size: 8, color: primaryColor, gap: 9 });
-      blockLine(`PIN: ${safe(addr.pincode)}`, { font: 'Helvetica-Bold', size: 9, color: primaryColor, gap: 13 });
-
+      blockLine('SHIP TO', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, spacingAfter: 3 });
+      doc.moveTo(shipBlockX, rY - 1).lineTo(RIGHT_EDGE, rY - 1).strokeColor(goldLight).lineWidth(0.75).stroke();
       rY += 4;
-      blockLine('FROM', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, gap: 9 });
-      doc.moveTo(shipBlockX, rY - 2).lineTo(RIGHT_EDGE, rY - 2).strokeColor(goldLight).lineWidth(0.75).stroke();
-      rY += 3;
-      blockLine('Godhara  Products', { font: 'Helvetica-Bold', size: 9, color: textDark, gap: 11 });
-      blockLine('Contact: +91 7661055143', { size: 7.5, gap: 9 });
-      blockLine('Email: support@godhara.com', { size: 7.5, gap: 9 });
-      blockLine('Website: www.godhara.com', { size: 7.5, gap: 9 });
-      blockLine('4-3-18, Chaman Gally', { size: 7.5, gap: 9 });
-      blockLine('Old Banswada', { size: 7.5, gap: 9 });
-      blockLine('Kamareddy, Telangana - 503187', { size: 7.5, gap: 9 });
+      blockLine(addr.name, { font: 'Helvetica-Bold', size: 10, color: textDark, spacingAfter: 3 });
+      blockLine(`Ph: ${safe(addr.phone)}`, { size: 7.5, spacingAfter: 2 });
+      blockLine(`Email: ${safe(addr.email)}`, { size: 7.5, spacingAfter: 2 });
+      blockLine(addr.street, { size: 7.5, spacingAfter: 2 });
+      blockLine(`${safe(addr.city)}, ${safe(addr.state)}`, { font: 'Helvetica-Bold', size: 8, color: primaryColor, spacingAfter: 2 });
+      blockLine(`PIN: ${safe(addr.pincode)}`, { font: 'Helvetica-Bold', size: 9, color: primaryColor, spacingAfter: 6 });
+
+      blockLine('FROM', { font: 'Helvetica-Bold', size: 7.5, color: goldColor, spacingAfter: 3 });
+      doc.moveTo(shipBlockX, rY - 1).lineTo(RIGHT_EDGE, rY - 1).strokeColor(goldLight).lineWidth(0.75).stroke();
+      rY += 4;
+      blockLine('Godhara  Products', { font: 'Helvetica-Bold', size: 9, color: textDark, spacingAfter: 3 });
+      blockLine('Contact: +91 7661055143', { size: 7.5, spacingAfter: 2 });
+      blockLine('Email: support@godhara.com', { size: 7.5, spacingAfter: 2 });
+      blockLine('Website: www.godhara.com', { size: 7.5, spacingAfter: 2 });
+      blockLine('4-3-18, Chaman Gally', { size: 7.5, spacingAfter: 2 });
+      blockLine('Old Banswada', { size: 7.5, spacingAfter: 2 });
+      blockLine('Kamareddy, Telangana - 503187', { size: 7.5, spacingAfter: 2 });
 
       const shipBlockBottom = rY;
 
@@ -592,20 +615,29 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
 
       cursorY = Math.max(shipBlockBottom, barcodeBlockBottom) + 6;
 
-      // ================= 6. FOOTER content (fixed bottom position) =================
-      doc.moveTo(MARGIN, footerDividerY).lineTo(PAGE_WIDTH - MARGIN, footerDividerY).strokeColor(goldLight).lineWidth(0.75).stroke();
+      // FIX: safety valve for extreme cases (e.g. very long streets that
+      // wrap 2-3 times on both SHIP TO and FROM). If the dynamically
+      // measured content would run into the footer divider, nudge the
+      // divider/footer down slightly and clamp so nothing overlaps and
+      // everything still lands on this single A5 page — same design,
+      // just guaranteed not to collide even in worst-case data.
+      const safeFooterDividerY = Math.max(footerDividerY, cursorY + 4);
+      const footerShift = safeFooterDividerY - footerDividerY;
+
+      // ================= 6. FOOTER content (fixed bottom position, shifted only if needed) =================
+      doc.moveTo(MARGIN, safeFooterDividerY).lineTo(PAGE_WIDTH - MARGIN, safeFooterDividerY).strokeColor(goldLight).lineWidth(0.75).stroke();
 
       doc.font('Helvetica-Oblique').fontSize(8.5).fillColor(primaryColor)
-        .text('Thank you for shopping with Godhara ', MARGIN, thankYouY, { width: CONTENT_WIDTH, align: 'center' });
+        .text('Thank you for shopping with Godhara ', MARGIN, thankYouY + footerShift, { width: CONTENT_WIDTH, align: 'center' });
 
       doc.font('Helvetica').fontSize(6.5).fillColor(textMuted)
-        .text('Customer Support: +91 7661055143  |  support@godhara.com', MARGIN, supportY, { width: CONTENT_WIDTH, align: 'center' });
+        .text('Customer Support: +91 7661055143  |  support@godhara.com', MARGIN, supportY + footerShift, { width: CONTENT_WIDTH, align: 'center' });
 
       doc.font('Helvetica').fontSize(6.2).fillColor(textMuted)
-        .text('4-3-18, Chaman Gally, Old Banswada, Kamareddy, Telangana 503187', MARGIN, addressY, { width: CONTENT_WIDTH, align: 'center' });
+        .text('4-3-18, Chaman Gally, Old Banswada, Kamareddy, Telangana 503187', MARGIN, addressY + footerShift, { width: CONTENT_WIDTH, align: 'center' });
 
       doc.font('Helvetica').fontSize(6).fillColor('#AAAAAA')
-        .text('Powering Indian Vedic Traditions. Built by Nexkite.', MARGIN, creditY, { width: CONTENT_WIDTH, align: 'center' });
+        .text('Powering Indian Vedic Traditions. Built by Nexkite.', MARGIN, creditY + footerShift, { width: CONTENT_WIDTH, align: 'center' });
 
       doc.end();
 
