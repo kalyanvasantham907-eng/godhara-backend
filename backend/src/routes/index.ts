@@ -6,8 +6,8 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { dbObj } from '../database/index.js';
-import { uploadImageToCloud, deleteImageFromCloud, extractPublicIdFromUrl } from '../services/imageStorage.js';
 import { generateInvoicePDF, generateShippingLabelPDF, getInvoicePath, getLabelPath } from '../services/pdf.js';
+import { uploadShippingLabelToDrive, uploadDriveTestFile } from '../services/googleDrive.js';
 import { 
   sendOrderConfirmationEmail, 
   sendEmailVerification, 
@@ -36,6 +36,29 @@ export const apiRouter = Router();
 // Health check — for Render / uptime monitors
 apiRouter.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Google Drive integration smoke test — uploads a small test.txt file into
+// the "Godhara Labels/YYYY/Month" folder chain and returns its Drive URL.
+apiRouter.get('/test-drive', async (_req, res) => {
+  try {
+    const result = await uploadDriveTestFile();
+    if (!result) {
+      return res.status(503).json({
+        success: false,
+        message: 'Google Drive is not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY environment variables.'
+      });
+    }
+    res.json({
+      success: true,
+      message: 'Test file uploaded to Google Drive successfully.',
+      fileId: result.fileId,
+      url: result.webViewLink
+    });
+  } catch (err: any) {
+    console.error('[test-drive] Error:', err);
+    res.status(500).json({ success: false, message: 'Google Drive test upload failed', error: err.message });
+  }
 });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'gdh-secret-primary-8978038932-traditional-spirit';
@@ -1915,6 +1938,19 @@ apiRouter.post('/payment/verify', authenticateToken, async (req: AuthRequest, re
           labelPath
         });
 
+        // Upload the generated shipping label PDF to Google Drive
+        // (Godhara Labels/YYYY/Month). Best-effort — never blocks the order.
+        const driveResult = await uploadShippingLabelToDrive(labelPath, `Godhara-Label-${newOrder.id}.pdf`);
+        if (driveResult) {
+          dbObj.updateOrder(newOrder.id, {
+            driveFileId: driveResult.fileId,
+            driveFileUrl: driveResult.webViewLink
+          });
+          console.log(`[GoogleDrive] Shipping label uploaded for order ${newOrder.id}: ${driveResult.webViewLink}`);
+        } else {
+          console.warn(`[GoogleDrive] Shipping label upload skipped/failed for order ${newOrder.id} (Drive not configured or upload error).`);
+        }
+
         // Email dispatch with Razorpay attachments to customer
         await sendOrderConfirmationEmail(newOrder, invoicePath);
 
@@ -1974,7 +2010,7 @@ apiRouter.post('/orders', authenticateToken, async (req: AuthRequest, res) => {
     (async () => {
       try {
         const invoicePath = await generateInvoicePDF(newOrder);
-        await generateShippingLabelPDF(newOrder);
+        const labelPath = await generateShippingLabelPDF(newOrder);
 
         const relativeInvoice = `/api/orders/${newOrder.id}/invoice`;
         const relativeLabel = `/api/orders/${newOrder.id}/label`;
@@ -1983,6 +2019,15 @@ apiRouter.post('/orders', authenticateToken, async (req: AuthRequest, res) => {
           invoiceUrl: relativeInvoice,
           labelUrl: relativeLabel
         });
+
+        // Upload the generated shipping label PDF to Google Drive (best-effort)
+        const driveResult = await uploadShippingLabelToDrive(labelPath, `Godhara-Label-${newOrder.id}.pdf`);
+        if (driveResult) {
+          dbObj.updateOrder(newOrder.id, {
+            driveFileId: driveResult.fileId,
+            driveFileUrl: driveResult.webViewLink
+          });
+        }
 
         // Async confirmation email with Brevo or fallback simulation
         await sendOrderConfirmationEmail(newOrder, invoicePath);
@@ -2159,137 +2204,38 @@ apiRouter.get('/admin/customers', authenticateToken, requireAdmin, (req, res) =>
   res.json(customerProfiles);
 });
 
-// ADMIN PERSISTENT IMAGE UPLOADER
-apiRouter.post('/admin/upload', authenticateToken, requireAdmin, async (req, res) => {
+// NOTE: Product CRUD (create/update/delete) and product-image upload have
+// been removed. Products are a static in-code catalog — see
+// src/data/products.ts. To change a product, edit that file and redeploy.
+
+// ==========================================
+// 5b. CONTACT MESSAGES
+// ==========================================
+
+apiRouter.post('/contact', async (req, res) => {
+  const { name, email, phone, subject, message } = req.body;
+
+  if (!name || !email || !message) {
+    return res.status(400).json({ message: 'Name, email, and message are required' });
+  }
+
   try {
-    const { base64, filename } = req.body;
-    if (!base64) {
-      return res.status(400).json({ message: 'No base64 image data provided' });
-    }
-
-    console.log(`[Upload API] Received image file save request. Original Filename: ${filename || 'unnamed'}`);
-
-    const result = await uploadImageToCloud(base64, filename || 'image.jpg');
-    console.log(`[Upload API] Stored product image successfully. Resolved URL: ${result.url}. PublicId: ${result.publicId || 'N/A'}`);
-
-    res.json({ 
-      url: result.url,
-      imageUrl: result.url,
-      publicId: result.publicId || null
-    });
+    const saved = await dbObj.createContactMessage({ name, email, phone, subject, message });
+    res.status(201).json({ message: 'Your message has been received. We will get back to you soon.', id: saved.id });
   } catch (err: any) {
-    console.error('[Upload API] Fatal error inside server-side upload:', err);
-    res.status(500).json({ message: 'Fatal exception synchronizing image file data to Cloudinary', error: err.message });
+    console.error('[Contact API] Failed to save message:', err);
+    res.status(500).json({ message: 'Failed to submit contact message' });
   }
 });
 
-// PRODUCT MANAGEMENT: CRUD OPERATIONS
-apiRouter.post('/admin/products', authenticateToken, requireAdmin, (req, res) => {
-  const { name, description, price, discountPrice, stock, category, packageSize, weight, images, imagePublicIds, isFeatured } = req.body;
-
-  if (!name || !price || stock === undefined || !category || !packageSize) {
-    return res.status(400).json({ message: 'Name, price, stock, category, and package size parameters are required' });
+apiRouter.get('/admin/contact-messages', authenticateToken, requireAdmin, async (_req, res) => {
+  try {
+    const messages = await dbObj.getContactMessages();
+    res.json(messages);
+  } catch (err: any) {
+    console.error('[Contact API] Failed to load messages:', err);
+    res.status(500).json({ message: 'Failed to load contact messages' });
   }
-
-  console.log(`[Product API] CREATING product. Name: "${name}". Images:`, images);
-
-  const created = dbObj.createProduct({
-    name,
-    description,
-    price: parseFloat(price),
-    discountPrice: discountPrice ? parseFloat(discountPrice) : undefined,
-    stock: parseInt(stock),
-    category,
-    packageSize: String(packageSize).trim(),
-    // Legacy logistics-only field: no longer collected from the admin form, kept optional for backward compatibility.
-    weight: weight !== undefined && weight !== '' ? parseInt(weight) : undefined,
-    images: images || [],
-    imagePublicIds: imagePublicIds || [],
-    isFeatured: !!isFeatured
-  });
-
-  console.log(`[Product API] CREATED product ID: ${created.id}. Saved database image path(s):`, created.images);
-
-  // Automatically register category if missing
-  dbObj.addCategory(category);
-
-  res.status(201).json(created);
-});
-
-apiRouter.put('/admin/products/:id', authenticateToken, requireAdmin, async (req, res) => {
-  const updates = req.body;
-  const original = dbObj.findProductById(req.params.id);
-
-  if (!original) {
-    return res.status(404).json({ message: 'Required product id is not valid' });
-  }
-
-  console.log(`[Product API] UPDATING product "${original.name}" (ID: ${req.params.id}). Received updates:`, updates);
-
-  // If a product image is replaced/removed, delete the old Cloudinary image
-  if (updates.images && Array.isArray(updates.images)) {
-    const originalImages = original.images || [];
-    const updatedImages = updates.images;
-
-    // Detect removed images (images in original but NOT in update list)
-    const removedImages = originalImages.filter((img: string) => !updatedImages.includes(img));
-    
-    for (const imgUrl of removedImages) {
-      const publicId = extractPublicIdFromUrl(imgUrl);
-      if (publicId) {
-        console.log(`[Product API] Image replaced/removed: ${imgUrl}. Launching Cloudinary deletion for publicId: "${publicId}"`);
-        await deleteImageFromCloud(publicId);
-      }
-    }
-  }
-
-  // Save imagePublicIds if provided
-  if (updates.imagePublicIds && Array.isArray(updates.imagePublicIds)) {
-    // Already stored in updates
-  }
-
-  // Typecasting
-  if (updates.price) updates.price = parseFloat(updates.price);
-  if (updates.discountPrice) updates.discountPrice = parseFloat(updates.discountPrice);
-  if (updates.stock !== undefined) updates.stock = parseInt(updates.stock);
-  if (updates.packageSize !== undefined) updates.packageSize = String(updates.packageSize).trim();
-  // Legacy logistics-only field: still accepted for backward compatibility if ever sent.
-  if (updates.weight) updates.weight = parseInt(updates.weight);
-
-  const updated = dbObj.updateProduct(req.params.id, updates);
-
-  console.log(`[Product API] UPDATED product ID: ${req.params.id}. Saved database image path(s) successfully:`, updated?.images);
-
-  if (updates.category) {
-    dbObj.addCategory(updates.category);
-  }
-
-  res.json(updated);
-});
-
-apiRouter.delete('/admin/products/:id', authenticateToken, requireAdmin, async (req, res) => {
-  console.log(`[Product API] ARCHIVING/DELETING product ID: ${req.params.id}`);
-  
-  const product = dbObj.findProductById(req.params.id);
-  if (!product) {
-    console.warn(`[Product API] Archive failed: Product ID ${req.params.id} not found.`);
-    return res.status(404).json({ message: 'Target product not found to delete' });
-  }
-
-  // Delete associated images from Cloudinary before product removal
-  if (product.images && Array.isArray(product.images)) {
-    for (const imgUrl of product.images) {
-      const publicId = extractPublicIdFromUrl(imgUrl);
-      if (publicId) {
-        console.log(`[Product API] Deletion triggers Cloudinary destroy for: ${imgUrl} with public ID: ${publicId}`);
-        await deleteImageFromCloud(publicId);
-      }
-    }
-  }
-
-  const success = dbObj.deleteProduct(req.params.id);
-  console.log(`[Product API] ARCHIVED/DELETED product ID: ${req.params.id} successfully.`);
-  res.json({ message: 'Product successfully archived / soft-deleted' });
 });
 
 // ==========================================
