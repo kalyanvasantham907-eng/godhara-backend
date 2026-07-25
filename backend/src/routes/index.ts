@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { dbObj } from '../database/index.js';
 import { generateInvoicePDF, generateShippingLabelPDF, getInvoicePath, getLabelPath } from '../services/pdf.js';
-import { uploadShippingLabelToDrive, uploadDriveTestFile } from '../services/googleDrive.js';
+import { uploadShippingLabelToDrive, uploadDriveTestFile, getDriveOAuthClient } from '../services/googleDrive.js';
 import { 
   sendOrderConfirmationEmail, 
   sendEmailVerification, 
@@ -46,7 +46,7 @@ apiRouter.get('/test-drive', async (_req, res) => {
     if (!result) {
       return res.status(503).json({
         success: false,
-        message: 'Google Drive is not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY environment variables.'
+        message: 'Google Drive is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_REDIRECT_URI and GOOGLE_DRIVE_REFRESH_TOKEN environment variables.'
       });
     }
     res.json({
@@ -58,6 +58,77 @@ apiRouter.get('/test-drive', async (_req, res) => {
   } catch (err: any) {
     console.error('[test-drive] Error:', err);
     res.status(500).json({ success: false, message: 'Google Drive test upload failed', error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Google Drive OAuth2 one-time setup flow.
+//
+// This is completely independent of the app's existing "Sign in with Google"
+// customer/admin login (which continues to use OAuth2Client from
+// google-auth-library elsewhere in this file, untouched). These two routes
+// exist solely to obtain a long-lived refresh token for the Drive service
+// used to store generated shipping label PDFs — visit /connect once, approve
+// access, and copy the refresh_token returned by /callback into the
+// GOOGLE_DRIVE_REFRESH_TOKEN environment variable (e.g. as a Railway
+// variable). They are not part of the customer/admin authentication flow.
+// ---------------------------------------------------------------------------
+
+const GOOGLE_DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.file'];
+
+apiRouter.get('/google-drive/connect', (_req, res) => {
+  try {
+    const client = getDriveOAuthClient();
+    const authUrl = client.generateAuthUrl({
+      access_type: 'offline',
+      prompt: 'consent',
+      scope: GOOGLE_DRIVE_SCOPES,
+    });
+    res.redirect(authUrl);
+  } catch (err: any) {
+    console.error('[google-drive/connect] Error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to start Google Drive OAuth flow',
+      error: err.message
+    });
+  }
+});
+
+apiRouter.get('/google-drive/callback', async (req: Request, res: Response) => {
+  const code = req.query.code as string | undefined;
+  const oauthError = req.query.error as string | undefined;
+
+  if (oauthError) {
+    return res.status(400).json({ success: false, message: 'Google OAuth consent was denied or failed', error: oauthError });
+  }
+
+  if (!code) {
+    return res.status(400).json({ success: false, message: 'Missing "code" query parameter from Google OAuth redirect' });
+  }
+
+  try {
+    const client = getDriveOAuthClient();
+    const { tokens } = await client.getToken(code);
+
+    if (!tokens.refresh_token) {
+      return res.status(200).json({
+        success: false,
+        message: 'Google did not return a refresh_token. This usually means you have already authorized this app before — revoke access at https://myaccount.google.com/permissions and try /api/google-drive/connect again with prompt=consent.',
+        tokens
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Copy the refresh_token below into your GOOGLE_DRIVE_REFRESH_TOKEN environment variable.',
+      refresh_token: tokens.refresh_token,
+      access_token: tokens.access_token,
+      expiry_date: tokens.expiry_date
+    });
+  } catch (err: any) {
+    console.error('[google-drive/callback] Error:', err);
+    res.status(500).json({ success: false, message: 'Failed to exchange authorization code for tokens', error: err.message });
   }
 });
 
