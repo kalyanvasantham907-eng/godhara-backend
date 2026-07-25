@@ -1,19 +1,26 @@
 /**
  * Google Drive integration — used to store generated shipping label PDFs.
  *
- * Auth: Google Service Account credentials, supplied via environment variables
- * (no credentials JSON file committed to the repo):
+ * Auth: Google OAuth2 (installed/web app flow), supplied via environment
+ * variables (no credentials JSON file committed to the repo):
  *
- *   GOOGLE_SERVICE_ACCOUNT_EMAIL   — the service account's client_email
- *   GOOGLE_PRIVATE_KEY             — the service account's private_key
- *                                    (with literal `\n` sequences — they are
- *                                    unescaped below)
- *   GOOGLE_DRIVE_PARENT_FOLDER_ID  — optional. If set, the "Godhara Labels"
- *                                    root folder is created inside this
- *                                    folder (e.g. a Shared Drive folder the
- *                                    service account has access to). If not
- *                                    set, the root folder is created in the
- *                                    service account's own Drive space.
+ *   GOOGLE_CLIENT_ID              — OAuth2 client ID
+ *   GOOGLE_CLIENT_SECRET          — OAuth2 client secret
+ *   GOOGLE_DRIVE_REDIRECT_URI     — OAuth2 redirect URI registered with the
+ *                                    client (must match the one used in the
+ *                                    consent screen redirect, e.g.
+ *                                    https://your-app.example.com/api/google-drive/callback)
+ *   GOOGLE_DRIVE_REFRESH_TOKEN    — long-lived refresh token obtained once
+ *                                    via the /api/google-drive/connect ->
+ *                                    /api/google-drive/callback flow. Access
+ *                                    tokens are minted from this refresh
+ *                                    token automatically and refreshed
+ *                                    transparently by the googleapis client
+ *                                    whenever they expire.
+ *
+ * This module is completely separate from — and does not affect — the
+ * existing Google Login (OAuth2Client from google-auth-library), JWT
+ * sessions, OTP, or admin/customer auth flows defined elsewhere in the app.
  *
  * Folder layout created automatically:
  *   Godhara Labels/
@@ -28,34 +35,61 @@ import fs from 'fs';
 const ROOT_FOLDER_NAME = 'Godhara Labels';
 
 let driveClient: ReturnType<typeof google.drive> | null = null;
+let oauth2Client: InstanceType<typeof google.auth.OAuth2> | null = null;
 let authConfigured = false;
 
+/**
+ * Lazily builds the OAuth2 client + Drive client from environment variables.
+ * Returns true if Drive is usable, false (without throwing) if the required
+ * env vars are missing — callers treat Drive as best-effort.
+ */
 function ensureDriveConfigured(): boolean {
   if (authConfigured) return true;
 
-  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  let privateKey = process.env.GOOGLE_PRIVATE_KEY;
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_DRIVE_REDIRECT_URI;
+  const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN;
 
-  if (!clientEmail || !privateKey) {
+  if (!clientId || !clientSecret || !redirectUri || !refreshToken) {
     console.warn(
-      '[GoogleDrive] Missing GOOGLE_SERVICE_ACCOUNT_EMAIL / GOOGLE_PRIVATE_KEY env vars — Drive uploads disabled.'
+      '[GoogleDrive] Missing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_DRIVE_REDIRECT_URI / GOOGLE_DRIVE_REFRESH_TOKEN env vars — Drive uploads disabled.'
     );
     return false;
   }
 
-  // Env vars usually store the key with literal "\n" — convert to real newlines.
-  privateKey = privateKey.replace(/\\n/g, '\n');
+  oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
 
-  const auth = new google.auth.JWT({
-    email: clientEmail,
-    key: privateKey,
-    scopes: ['https://www.googleapis.com/auth/drive'],
-  });
+  // googleapis automatically exchanges the refresh_token for a fresh
+  // access_token whenever the current one is missing/expired, so no manual
+  // refresh handling is required here.
 
-  driveClient = google.drive({ version: 'v3', auth });
+  driveClient = google.drive({ version: 'v3', auth: oauth2Client });
   authConfigured = true;
-  console.log(`[GoogleDrive] Configured for service account: ${clientEmail}`);
+  console.log('[GoogleDrive] Configured via OAuth2 refresh token.');
   return true;
+}
+
+/**
+ * Returns a configured OAuth2Client instance to be used by the
+ * /api/google-drive/connect and /api/google-drive/callback routes for the
+ * initial consent + code exchange flow (i.e. to generate a new refresh
+ * token). This is independent of the app's existing Google Login OAuth2
+ * client.
+ */
+export function getDriveOAuthClient(): InstanceType<typeof google.auth.OAuth2> {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_DRIVE_REDIRECT_URI;
+
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error(
+      'Missing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_DRIVE_REDIRECT_URI environment variables.'
+    );
+  }
+
+  return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
 /**
