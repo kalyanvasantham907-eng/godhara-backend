@@ -19,6 +19,7 @@
 import fs   from 'fs';
 import path from 'path';
 import pg   from 'pg';
+import { getActiveProducts, getCategories as getStaticCategories } from '../data/products.js';
 
 const { Pool } = pg;
 
@@ -166,25 +167,6 @@ export async function ensureSchema() {
         "lockUntil"          TIMESTAMP DEFAULT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS products (
-        id               VARCHAR(512) PRIMARY KEY,
-        name             TEXT NOT NULL,
-        slug             TEXT UNIQUE NOT NULL,
-        description      TEXT DEFAULT '',
-        price            NUMERIC NOT NULL,
-        "discountPrice"  NUMERIC,
-        stock            INT DEFAULT 0,
-        category         TEXT NOT NULL,
-        images           JSONB DEFAULT '[]'::jsonb,
-        "imagePublicIds" JSONB DEFAULT '[]'::jsonb,
-        "isFeatured"     BOOLEAN DEFAULT FALSE,
-        "isActive"       BOOLEAN DEFAULT TRUE,
-        "packageSize"    TEXT DEFAULT '',
-        weight           REAL,
-        "createdAt"      TIMESTAMP NOT NULL DEFAULT NOW(),
-        "updatedAt"      TIMESTAMP NOT NULL DEFAULT NOW()
-      );
-
       CREATE TABLE IF NOT EXISTS orders (
         id                VARCHAR(512) PRIMARY KEY,
         "userId"          VARCHAR(512) REFERENCES users(id) ON DELETE SET NULL,
@@ -198,8 +180,21 @@ export async function ensureSchema() {
         "invoiceUrl"      TEXT DEFAULT '',
         "labelUrl"        TEXT DEFAULT '',
         "trackingNumber"  TEXT DEFAULT '',
+        "driveFileId"     TEXT DEFAULT '',
+        "driveFileUrl"    TEXT DEFAULT '',
         "createdAt"       TIMESTAMP NOT NULL DEFAULT NOW(),
         "updatedAt"       TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS contact_messages (
+        id          VARCHAR(512) PRIMARY KEY,
+        name        TEXT NOT NULL,
+        email       TEXT NOT NULL,
+        phone       TEXT DEFAULT '',
+        subject     TEXT DEFAULT '',
+        message     TEXT NOT NULL,
+        "isRead"    BOOLEAN DEFAULT FALSE,
+        "createdAt" TIMESTAMP NOT NULL DEFAULT NOW()
       );
 
       CREATE TABLE IF NOT EXISTS carts (
@@ -297,12 +292,8 @@ export async function ensureSchema() {
       CREATE INDEX IF NOT EXISTS idx_users_deleted        ON users("deletedAt") WHERE "deletedAt" IS NULL;
       CREATE INDEX IF NOT EXISTS idx_users_googleid       ON users("googleId") WHERE "googleId" IS NOT NULL;
 
-      -- Products hot paths
-      CREATE INDEX IF NOT EXISTS idx_products_slug        ON products(slug);
-      CREATE INDEX IF NOT EXISTS idx_products_category    ON products(category);
-      CREATE INDEX IF NOT EXISTS idx_products_active      ON products("isActive") WHERE "isActive" = TRUE;
-      CREATE INDEX IF NOT EXISTS idx_products_featured    ON products("isFeatured", "isActive") WHERE "isFeatured" = TRUE AND "isActive" = TRUE;
-      CREATE INDEX IF NOT EXISTS idx_products_updated     ON products("updatedAt");
+      -- Contact messages
+      CREATE INDEX IF NOT EXISTS idx_contact_messages_created ON contact_messages("createdAt" DESC);
 
       -- Orders hot paths
       CREATE INDEX IF NOT EXISTS idx_orders_userid        ON orders("userId");
@@ -338,9 +329,8 @@ export async function ensureSchema() {
 
     // Safe migrations for columns added post-initial-deploy
     await client.query(`
-      ALTER TABLE products ADD COLUMN IF NOT EXISTS "imagePublicIds" JSONB DEFAULT '[]'::jsonb;
-      ALTER TABLE products ADD COLUMN IF NOT EXISTS "packageSize"    TEXT DEFAULT '';
-      UPDATE products SET "packageSize" = '' WHERE "packageSize" IS NULL;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS "driveFileId"  TEXT DEFAULT '';
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS "driveFileUrl" TEXT DEFAULT '';
       ALTER TABLE settings ADD COLUMN IF NOT EXISTS "deliveryChargeTelangana" NUMERIC DEFAULT 70;
       ALTER TABLE settings ADD COLUMN IF NOT EXISTS "deliveryChargeAP"        NUMERIC DEFAULT 80;
       ALTER TABLE settings ADD COLUMN IF NOT EXISTS "deliveryChargeOther"     NUMERIC DEFAULT 100;
@@ -365,8 +355,8 @@ export async function ensureSchema() {
 //       to reduce memory footprint. They are read on-demand directly from DB.
 export async function loadFromPostgres(): Promise<AppCache> {
   const empty = (): AppCache => ({
-    users: [], products: [], orders: [], carts: [],
-    categories: [], coupons: [], settings: defaultSettings(),
+    users: [], products: getActiveProducts(), orders: [], carts: [],
+    categories: getStaticCategories(), coupons: [], settings: defaultSettings(),
     email_verifications: [], password_resets: [],
     _loadedAt: Date.now(),
   });
@@ -376,11 +366,12 @@ export async function loadFromPostgres(): Promise<AppCache> {
   const t0 = Date.now();
   try {
     // Fire all queries in parallel — shared pool manages concurrency
+    // NOTE: products are a static in-code catalog (src/data/products.ts) —
+    // never read from or written to Postgres.
     const [
       resCategories,
       resSettings,
       resUsers,
-      resProducts,
       resOrders,
       resCarts,
       resCoupons,
@@ -390,7 +381,6 @@ export async function loadFromPostgres(): Promise<AppCache> {
       pool.query('SELECT name FROM categories'),
       pool.query('SELECT * FROM settings WHERE id = $1', ['global']),
       pool.query('SELECT * FROM users WHERE "deletedAt" IS NULL'),
-      pool.query('SELECT * FROM products WHERE "isActive" = TRUE'),
       pool.query('SELECT * FROM orders ORDER BY "createdAt" DESC LIMIT 500'),
       pool.query('SELECT * FROM carts'),
       pool.query('SELECT * FROM coupons'),
@@ -406,11 +396,13 @@ export async function loadFromPostgres(): Promise<AppCache> {
     else if (ms > 1000) console.log(`[loadFromPostgres] ✅ ${ms}ms (Neon cold start)`);
     else console.log(`[loadFromPostgres] ✅ ${ms}ms`);
 
+    const dbCategories = resCategories.rows.map((r: any) => r.name);
+
     return {
-      categories:           resCategories.rows.map((r: any) => r.name),
+      categories:           dbCategories.length > 0 ? dbCategories : getStaticCategories(),
       settings:             resSettings.rows.length > 0 ? parseSettings({ ...resSettings.rows[0] }) : defaultSettings(),
       users:                resUsers.rows.map(parseRow),
-      products:             resProducts.rows.map(parseRow),
+      products:             getActiveProducts(),
       orders:               resOrders.rows.map(parseRow),
       carts:                resCarts.rows.map(parseRow),
       coupons:              resCoupons.rows.map(parseRow),
@@ -443,9 +435,8 @@ export async function reloadCache(): Promise<void> {
         ? new Date(cache._loadedAt - 5000).toISOString() // 5s overlap buffer
         : new Date(0).toISOString();
 
-      const [resUsers, resProducts, resOrders, resCoupons] = await Promise.all([
+      const [resUsers, resOrders, resCoupons] = await Promise.all([
         pool.query('SELECT * FROM users    WHERE "updatedAt" > $1 AND "deletedAt" IS NULL', [since]),
-        pool.query('SELECT * FROM products WHERE "updatedAt" > $1',                         [since]),
         pool.query('SELECT * FROM orders   WHERE "updatedAt" > $1 ORDER BY "createdAt" DESC LIMIT 500', [since]),
         pool.query('SELECT * FROM coupons  WHERE TRUE'),   // small table, always full
       ]);
@@ -462,7 +453,7 @@ export async function reloadCache(): Promise<void> {
         };
 
         cache.users    = mergeById(cache.users,    resUsers.rows);
-        cache.products = mergeById(cache.products, resProducts.rows);
+        cache.products = getActiveProducts(); // static catalog — never queried
         cache.orders   = mergeById(cache.orders,   resOrders.rows);
         cache.coupons  = resCoupons.rows.map(parseRow);
         cache._loadedAt = Date.now();
@@ -513,52 +504,41 @@ export async function pgUpsertUser(u: any): Promise<void> {
   );
 }
 
-export async function pgUpsertProduct(p: any): Promise<void> {
-  if (!isPostgresConnected) return;
-  await pool.query(
-    `INSERT INTO products
-       (id,name,slug,description,price,"discountPrice",stock,category,images,
-        "imagePublicIds","isFeatured","isActive","packageSize",weight,"createdAt","updatedAt")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-     ON CONFLICT (id) DO UPDATE SET
-       name=$2, slug=$3, description=$4, price=$5, "discountPrice"=$6,
-       stock=$7, category=$8, images=$9, "imagePublicIds"=$10,
-       "isFeatured"=$11, "isActive"=$12, "packageSize"=$13, weight=$14, "updatedAt"=$16`,
-    [
-      p.id, p.name, p.slug, p.description ?? '', p.price, p.discountPrice ?? null,
-      p.stock ?? 0, p.category, JSON.stringify(p.images ?? []),
-      JSON.stringify(p.imagePublicIds ?? []), !!p.isFeatured, p.isActive !== false,
-      p.packageSize ?? '', p.weight ?? null, p.createdAt, p.updatedAt,
-    ]
-  );
-}
-
-export async function pgDecrementStock(productId: string, qty: number): Promise<void> {
-  if (!isPostgresConnected) return;
-  await pool.query(
-    `UPDATE products SET stock = stock - $2, "updatedAt" = NOW()
-     WHERE id = $1 AND stock >= $2`,
-    [productId, qty]
-  );
-}
-
 export async function pgUpsertOrder(o: any): Promise<void> {
   if (!isPostgresConnected) return;
   await pool.query(
     `INSERT INTO orders
        (id,"userId",items,subtotal,"shippingCharge",total,status,"paymentStatus",
-        "shippingAddress","invoiceUrl","labelUrl","trackingNumber","createdAt","updatedAt")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        "shippingAddress","invoiceUrl","labelUrl","trackingNumber","driveFileId","driveFileUrl","createdAt","updatedAt")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      ON CONFLICT (id) DO UPDATE SET
        status=$7, "paymentStatus"=$8, "invoiceUrl"=$10,
-       "labelUrl"=$11, "trackingNumber"=$12, "updatedAt"=$14`,
+       "labelUrl"=$11, "trackingNumber"=$12, "driveFileId"=$13, "driveFileUrl"=$14, "updatedAt"=$16`,
     [
       o.id, o.userId, JSON.stringify(o.items ?? []), o.subtotal, o.shippingCharge,
       o.total, o.status, o.paymentStatus, JSON.stringify(o.shippingAddress ?? {}),
       o.invoiceUrl ?? '', o.labelUrl ?? '', o.trackingNumber ?? '',
+      o.driveFileId ?? '', o.driveFileUrl ?? '',
       o.createdAt, o.updatedAt,
     ]
   );
+}
+
+export async function pgInsertContactMessage(msg: any): Promise<void> {
+  if (!isPostgresConnected) return;
+  await pool.query(
+    `INSERT INTO contact_messages (id,name,email,phone,subject,message,"isRead","createdAt")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [msg.id, msg.name, msg.email, msg.phone ?? '', msg.subject ?? '', msg.message, false, msg.createdAt]
+  );
+}
+
+export async function pgGetContactMessages(): Promise<any[]> {
+  if (!isPostgresConnected) return [];
+  try {
+    const res = await pool.query('SELECT * FROM contact_messages ORDER BY "createdAt" DESC LIMIT 500');
+    return res.rows.map(parseRow);
+  } catch { return []; }
 }
 
 export async function pgUpsertCart(userId: string, cartId: string, items: any[], updatedAt: string): Promise<void> {
@@ -722,24 +702,7 @@ function buildSeedData(): any {
         createdAt: now, updatedAt: now,
       },
     ],
-    products: [
-      {
-        id: 'prod-1', name: 'Godhara Pure Desi Gir Cow A2 Ghee (Bilona)',
-        slug: 'godhara-pure-desi-gir-cow-a2-ghee-bilona',
-        description: 'Made using the sacred ancient Vedic Bilona method from hand-churned curd.',
-        price: 1200, discountPrice: 1050, stock: 45, category: 'Dairy Products',
-        images: ['https://images.unsplash.com/photo-1589927986089-35812388d1f4?auto=format&fit=crop&q=80&w=600'],
-        imagePublicIds: [], isFeatured: true, isActive: true, packageSize: '500 g', weight: 500, createdAt: now, updatedAt: now,
-      },
-      {
-        id: 'prod-2', name: 'Ganga Jal Ayurvedic Panchagavya Soap',
-        slug: 'ganga-jal-ayurvedic-panchagavya-soap',
-        description: 'A traditional skincare bar loaded with five sacred cow offerings.',
-        price: 180, discountPrice: 145, stock: 120, category: 'Personal Care',
-        images: ['https://images.unsplash.com/photo-1607006342411-9a336340f1a9?auto=format&fit=crop&q=80&w=600'],
-        imagePublicIds: [], isFeatured: true, isActive: true, packageSize: '125 g', weight: 125, createdAt: now, updatedAt: now,
-      },
-    ],
+    products: getActiveProducts(), // static catalog — never seeded into Postgres
     orders: [], carts: [],
     categories: ['Dairy Products', 'Personal Care', 'Spiritual', 'Ayurvedic Remedies'],
     coupons: [
@@ -777,9 +740,8 @@ export async function flushToPostgres(data: any): Promise<void> {
     if (data.users) {
       for (const u of data.users) await pgUpsertUser(u);
     }
-    if (data.products) {
-      for (const p of data.products) await pgUpsertProduct(p);
-    }
+    // NOTE: products are intentionally never flushed to Postgres — they are
+    // a static in-code catalog (src/data/products.ts).
     if (data.orders) {
       for (const o of data.orders) await pgUpsertOrder(o);
     }
@@ -860,6 +822,10 @@ async function startupInit() {
       fs.writeFileSync(dbJsonPath, JSON.stringify(seed, null, 2), 'utf8');
       cache = { ...seed, _loadedAt: Date.now() };
     }
+    // Products always come from the static catalog, never from db.json
+    // (older db.json files on disk may contain stale/removed product data).
+    cache.products = getActiveProducts();
+    cache.categories = getStaticCategories();
     console.log('[Database_Fallback] JSON cache loaded ✅');
   }
 }
@@ -971,7 +937,7 @@ export const dbObj = {
     return true;
   },
 
-  // ── PRODUCTS ──────────────────────────────────────────────────────────────
+  // ── PRODUCTS (static catalog — read-only, never stored in Postgres) ───────
   getProducts() {
     return getCache().products;
   },
@@ -980,43 +946,6 @@ export const dbObj = {
   },
   findProductBySlug(slug: string) {
     return getCache().products.find((p: any) => p.slug === slug) ?? null;
-  },
-  createProduct(prod: any) {
-    const c = getCache();
-    const slug = prod.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-    const newProduct = {
-      id: `prod-${Date.now()}`, slug, isActive: true, isFeatured: false,
-      images: prod.images ?? [], imagePublicIds: prod.imagePublicIds ?? [],
-      packageSize: prod.packageSize ?? '',
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      ...prod,
-    };
-    c.products.push(newProduct);
-    pgUpsertProduct(newProduct).catch(console.error);
-    writeJsonFallback({});
-    return newProduct;
-  },
-  updateProduct(id: string, updates: any) {
-    const c = getCache();
-    const idx = c.products.findIndex((p: any) => p.id === id);
-    if (idx === -1) return null;
-    if (updates.name) {
-      updates.slug = updates.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-    }
-    c.products[idx] = { ...c.products[idx], ...updates, updatedAt: new Date().toISOString() };
-    pgUpsertProduct(c.products[idx]).catch(console.error);
-    writeJsonFallback({});
-    return c.products[idx];
-  },
-  deleteProduct(id: string) {
-    const c = getCache();
-    const idx = c.products.findIndex((p: any) => p.id === id);
-    if (idx === -1) return false;
-    c.products[idx].isActive = false;
-    c.products[idx].updatedAt = new Date().toISOString();
-    pgUpsertProduct(c.products[idx]).catch(console.error);
-    writeJsonFallback({});
-    return true;
   },
 
   // ── CATEGORIES ────────────────────────────────────────────────────────────
@@ -1080,14 +1009,16 @@ export const dbObj = {
       }
     }
 
-    // Decrement stock in cache + DB atomically
+    // Decrement stock in the in-memory cache only. Products are a static
+    // in-code catalog (src/data/products.ts) — there is no products table
+    // to persist this to. This gives "out of stock" signalling for the
+    // lifetime of the running process; restarting the server resets stock
+    // to the static catalog's baseline values.
     for (const item of orderData.items) {
       const prod = c.products.find((p: any) => p.id === item.productId);
       if (prod) {
         prod.stock -= item.qty;
         prod.updatedAt = new Date().toISOString();
-        // Atomic SQL decrement (safer than the cache value)
-        pgDecrementStock(item.productId, item.qty).catch(console.error);
       }
     }
 
@@ -1329,6 +1260,26 @@ export const dbObj = {
     if (user.passwordHistory.length > 3) user.passwordHistory.shift();
     pgUpsertUser(user).catch(console.error);
     writeJsonFallback({});
+  },
+
+  // ── CONTACT MESSAGES ──────────────────────────────────────────────────────
+  // Written directly to DB (small volume, admin-read-only) — not cached.
+  async createContactMessage(msg: { name: string; email: string; phone?: string; subject?: string; message: string }) {
+    const entry = {
+      id: `contact-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      name: msg.name,
+      email: msg.email,
+      phone: msg.phone ?? '',
+      subject: msg.subject ?? '',
+      message: msg.message,
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    };
+    await pgInsertContactMessage(entry).catch((err) => console.error('[ContactMessage] insert failed:', err));
+    return entry;
+  },
+  async getContactMessages() {
+    return pgGetContactMessages();
   },
 
   // ── HEALTH ────────────────────────────────────────────────────────────────
