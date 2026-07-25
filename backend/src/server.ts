@@ -204,7 +204,7 @@ const allowedOrigins = [
     console.log(`   Session store: ${sessionStore ? 'PostgreSQL' : 'MemoryStore'}`);
     console.log(`   FROM_EMAIL   : ${process.env.FROM_EMAIL || '⚠️  Not set'}`);
     console.log(`   RESEND_KEY   : ${process.env.RESEND_API_KEY ? '✅' : '⚠️  Not set'}`);
-    console.log(`   Cloudinary   : ${process.env.CLOUDINARY_CLOUD_NAME ? '✅' : '⚠️  Not configured'}`);
+    console.log(`   Google Drive : ${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? '✅' : '⚠️  Not configured'}`);
   });
 }
 
