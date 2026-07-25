@@ -53,6 +53,10 @@ export interface Order {
   invoiceUrl: string;
   labelUrl: string;
   trackingNumber: string;
+  /** Google Drive file ID of the uploaded shipping label PDF, if Drive upload succeeded. */
+  driveFileId?: string;
+  /** Shareable Google Drive URL of the uploaded shipping label PDF. */
+  driveFileUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
