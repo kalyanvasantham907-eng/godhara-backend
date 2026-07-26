@@ -40,22 +40,21 @@ async function generateBarcodeBuffer(text: string): Promise<Buffer> {
 
 // Helper to retrieve the official company brand logo image path
 function getCompanyLogoPath(): string | null {
-  const logoPath = path.join(process.cwd(), 'public', 'logo.png');
+  const logoPaths = [
+    path.join(process.cwd(), 'public', 'logo.png'),
+    path.join(process.cwd(), 'assets', 'logo.png'),
+  ];
 
-  if (fs.existsSync(logoPath)) {
-    console.log(`[PDF Generator] Loaded company logo image from: ${logoPath}`);
-    return logoPath;
+  for (const logoPath of logoPaths) {
+    if (fs.existsSync(logoPath)) {
+      console.log(`[PDF Generator] Loaded company logo image from: ${logoPath}`);
+      return logoPath;
+    }
   }
 
-  console.warn('[PDF Generator] Warning: No company logo found at public/logo.png.');
+  console.warn('[PDF Generator] No company logo found.');
   return null;
 }
-const ASSETS_DIR = path.join(process.cwd(), 'assets');
-
-if (!fs.existsSync(ASSETS_DIR)) {
-  fs.mkdirSync(ASSETS_DIR, { recursive: true });
-}
-
 const defaultLogoPath = path.join(ASSETS_DIR, 'logo.png');
 
 if (!fs.existsSync(defaultLogoPath)) {
@@ -368,13 +367,43 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
 
       // ================= 1. HEADER (compact) =================
       const logoSize = 30;
-      const logoPath = getCompanyLogoPath();
-      if (logoPath) {
-        doc.image(logoPath, MARGIN, cursorY, { width: logoSize });
-      } else {
-        drawRoundedBox(MARGIN, cursorY, logoSize, logoSize, creamBg, goldLight, 6);
-        doc.font('Helvetica-Bold').fontSize(12).fillColor(primaryColor).text('G', MARGIN, cursorY + 9, { width: logoSize, align: 'center' });
-      }
+  const logoPath = getCompanyLogoPath();
+
+if (logoPath) {
+  try {
+    console.log("Using logo:", logoPath);
+
+    doc.image(logoPath, MARGIN, cursorY, {
+      width: logoSize,
+      height: logoSize,
+      fit: [logoSize, logoSize],
+      align: 'center',
+      valign: 'center',
+    });
+
+    console.log("✅ Logo added successfully");
+  } catch (err) {
+    console.error("❌ Logo error:", err);
+
+    drawRoundedBox(MARGIN, cursorY, logoSize, logoSize, creamBg, goldLight, 6);
+    doc.font('Helvetica-Bold')
+      .fontSize(12)
+      .fillColor(primaryColor)
+      .text('G', MARGIN, cursorY + 9, {
+        width: logoSize,
+        align: 'center',
+      });
+  }
+} else {
+  drawRoundedBox(MARGIN, cursorY, logoSize, logoSize, creamBg, goldLight, 6);
+  doc.font('Helvetica-Bold')
+    .fontSize(12)
+    .fillColor(primaryColor)
+    .text('G', MARGIN, cursorY + 9, {
+      width: logoSize,
+      align: 'center',
+    });
+}
 
       doc.font('Helvetica-Bold').fontSize(13).fillColor(primaryColor)
         .text('GODHARA', MARGIN + logoSize + 8, cursorY + 1);
