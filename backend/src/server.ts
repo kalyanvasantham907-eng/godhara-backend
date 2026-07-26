@@ -8,6 +8,7 @@ import path    from 'path';
 import fs      from 'fs';
 import { fileURLToPath } from 'url';
 import { apiRouter }     from './routes/index.js';
+import { isDriveConfigured } from './services/googleDrive.js';
 import {
   dbInitializationPromise,
   pool,
@@ -204,7 +205,7 @@ const allowedOrigins = [
     console.log(`   Session store: ${sessionStore ? 'PostgreSQL' : 'MemoryStore'}`);
     console.log(`   FROM_EMAIL   : ${process.env.FROM_EMAIL || '⚠️  Not set'}`);
     console.log(`   RESEND_KEY   : ${process.env.RESEND_API_KEY ? '✅' : '⚠️  Not set'}`);
-    console.log(`   Google Drive : ${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? '✅' : '⚠️  Not configured'}`);
+    console.log(`   Google Drive : ${isDriveConfigured() ? 'OAuth2 refresh token ✅' : '⚠️  Not configured'}`);
   });
 }
 
