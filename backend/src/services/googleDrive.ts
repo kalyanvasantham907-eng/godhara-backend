@@ -1,8 +1,10 @@
 /**
- * Google Drive integration — used to store generated shipping label PDFs.
+ * Google Drive integration — used to store generated Invoice and Shipping
+ * Label PDFs for each order.
  *
- * Auth: Google OAuth2 (installed/web app flow), supplied via environment
- * variables (no credentials JSON file committed to the repo):
+ * Auth: Google OAuth2 (refresh-token flow only), supplied via environment
+ * variables (no credentials JSON / service-account key file committed to
+ * the repo):
  *
  *   GOOGLE_CLIENT_ID              — OAuth2 client ID
  *   GOOGLE_CLIENT_SECRET          — OAuth2 client secret
@@ -17,31 +19,46 @@
  *                                    token automatically and refreshed
  *                                    transparently by the googleapis client
  *                                    whenever they expire.
+ *   GOOGLE_DRIVE_PARENT_FOLDER_ID — optional. If set, the "Godhara Labels"
+ *                                    root folder is created/looked up inside
+ *                                    this Drive folder instead of "My Drive"
+ *                                    root.
  *
  * This module is completely separate from — and does not affect — the
  * existing Google Login (OAuth2Client from google-auth-library), JWT
  * sessions, OTP, or admin/customer auth flows defined elsewhere in the app.
+ * There is no Service Account auth path here — OAuth2 refresh-token is the
+ * only supported authentication method.
  *
  * Folder layout created automatically:
  *   Godhara Labels/
  *     └── 2026/
  *          └── July/
- *               └── label-GDH-123456.pdf
+ *               ├── invoice-GDH123456.pdf
+ *               └── shipping-label-GDH123456.pdf
  */
 
-import { google } from 'googleapis';
+import { google, drive_v3 } from 'googleapis';
 import fs from 'fs';
 
 const ROOT_FOLDER_NAME = 'Godhara Labels';
 
-let driveClient: ReturnType<typeof google.drive> | null = null;
+export interface DriveUploadResult {
+  fileId: string;
+  webViewLink: string;
+}
+
+export type DriveDocumentKind = 'invoice' | 'shipping-label';
+
+let driveClient: drive_v3.Drive | null = null;
 let oauth2Client: InstanceType<typeof google.auth.OAuth2> | null = null;
 let authConfigured = false;
 
 /**
  * Lazily builds the OAuth2 client + Drive client from environment variables.
  * Returns true if Drive is usable, false (without throwing) if the required
- * env vars are missing — callers treat Drive as best-effort.
+ * env vars are missing — callers must treat Drive as best-effort and never
+ * let a missing/broken Drive config block order creation.
  */
 function ensureDriveConfigured(): boolean {
   if (authConfigured) return true;
@@ -64,7 +81,6 @@ function ensureDriveConfigured(): boolean {
   // googleapis automatically exchanges the refresh_token for a fresh
   // access_token whenever the current one is missing/expired, so no manual
   // refresh handling is required here.
-
   driveClient = google.drive({ version: 'v3', auth: oauth2Client });
   authConfigured = true;
   console.log('[GoogleDrive] Configured via OAuth2 refresh token.');
@@ -120,7 +136,7 @@ async function findFolder(name: string, parentId?: string): Promise<string | nul
 async function createFolder(name: string, parentId?: string): Promise<string> {
   if (!driveClient) throw new Error('Google Drive client not configured');
 
-  const fileMetadata: any = {
+  const fileMetadata: drive_v3.Schema$File = {
     name,
     mimeType: 'application/vnd.google-apps.folder',
   };
@@ -150,7 +166,8 @@ const folderCache = new Map<string, string>();
 
 /**
  * Ensures the "Godhara Labels/YYYY/Month" folder chain exists, creating any
- * missing folders along the way. Returns the deepest (Month) folder's ID.
+ * missing folders along the way. Returns the deepest (Month) folder's ID, or
+ * null if Drive isn't configured or the folder chain could not be created.
  */
 export async function ensureLabelFolderForDate(date: Date = new Date()): Promise<string | null> {
   if (!ensureDriveConfigured()) return null;
@@ -171,15 +188,11 @@ export async function ensureLabelFolderForDate(date: Date = new Date()): Promise
 
     folderCache.set(cacheKey, monthId);
     return monthId;
-  } catch (err: any) {
-    console.error('[GoogleDrive] Failed to ensure folder chain:', err?.message || err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[GoogleDrive] Failed to ensure folder chain:', message);
     return null;
   }
-}
-
-export interface DriveUploadResult {
-  fileId: string;
-  webViewLink: string;
 }
 
 /**
@@ -218,8 +231,9 @@ export async function uploadFileToDriveFolder(
       requestBody: { role: 'reader', type: 'anyone' },
       supportsAllDrives: true,
     });
-  } catch (err: any) {
-    console.warn('[GoogleDrive] Could not set public read permission:', err?.message || err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[GoogleDrive] Could not set public read permission:', message);
   }
 
   const webViewLink = res.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;
@@ -228,29 +242,47 @@ export async function uploadFileToDriveFolder(
 }
 
 /**
- * High-level helper: given a local PDF file already generated on disk,
- * upload it into the correct "Godhara Labels/YYYY/Month" folder.
- * Returns null (without throwing) if Drive isn't configured, so callers can
- * treat Drive upload as best-effort and never block order processing.
+ * Builds the standardized Drive filename for an order document, e.g.
+ * "invoice-GDH123456.pdf" / "shipping-label-GDH123456.pdf".
  */
-export async function uploadShippingLabelToDrive(
+export function buildOrderDocumentFilename(kind: DriveDocumentKind, orderId: string): string {
+  const normalizedOrderId = orderId.replace(/-/g, '');
+  return `${kind}-${normalizedOrderId}.pdf`;
+}
+
+/**
+ * High-level helper: given a local PDF already generated on disk, upload it
+ * into the correct "Godhara Labels/YYYY/Month" folder using the standardized
+ * filename convention. Returns null (without throwing) if Drive isn't
+ * configured or the upload fails, so callers can always treat Drive upload
+ * as best-effort and never block order processing on it.
+ */
+export async function uploadOrderDocumentToDrive(
   localFilePath: string,
-  filename: string
+  kind: DriveDocumentKind,
+  orderId: string
 ): Promise<DriveUploadResult | null> {
   if (!ensureDriveConfigured()) return null;
   try {
     const folderId = await ensureLabelFolderForDate(new Date());
     if (!folderId) return null;
+    const filename = buildOrderDocumentFilename(kind, orderId);
     return await uploadFileToDriveFolder(localFilePath, filename, 'application/pdf', folderId);
-  } catch (err: any) {
-    console.error('[GoogleDrive] Shipping label upload failed:', err?.message || err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[GoogleDrive] ${kind} upload failed for order ${orderId}:`, message);
     return null;
   }
 }
 
+export function isDriveConfigured(): boolean {
+  return ensureDriveConfigured();
+}
+
 /**
- * Used by GET /api/test-drive — uploads a small test.txt file into the
- * "Godhara Labels/YYYY/Month" folder chain and returns its Drive URL.
+ * Used by GET /api/test-drive (dev/admin-only smoke test) — uploads a small
+ * test.txt file into the "Godhara Labels/YYYY/Month" folder chain and
+ * returns its Drive URL.
  */
 export async function uploadDriveTestFile(): Promise<DriveUploadResult | null> {
   if (!ensureDriveConfigured()) return null;
@@ -263,13 +295,8 @@ export async function uploadDriveTestFile(): Promise<DriveUploadResult | null> {
   try {
     const folderId = await ensureLabelFolderForDate(new Date());
     if (!folderId) return null;
-    const result = await uploadFileToDriveFolder(tmpPath, 'test.txt', 'text/plain', folderId);
-    return result;
+    return await uploadFileToDriveFolder(tmpPath, 'test.txt', 'text/plain', folderId);
   } finally {
     fs.unlink(tmpPath, () => {});
   }
-}
-
-export function isDriveConfigured(): boolean {
-  return ensureDriveConfigured();
 }
