@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { dbObj } from '../database/index.js';
 import { generateInvoicePDF, generateShippingLabelPDF, getInvoicePath, getLabelPath } from '../services/pdf.js';
-import { uploadShippingLabelToDrive, uploadDriveTestFile, getDriveOAuthClient } from '../services/googleDrive.js';
+import { uploadOrderDocumentToDrive, uploadDriveTestFile, getDriveOAuthClient } from '../services/googleDrive.js';
 import { 
   sendOrderConfirmationEmail, 
   sendEmailVerification, 
@@ -33,6 +33,79 @@ import {
 
 export const apiRouter = Router();
 
+/**
+ * Uploads an order's generated Invoice + Shipping Label PDFs to Google Drive
+ * and persists the resulting file IDs/URLs on the order record. Entirely
+ * best-effort: uploadOrderDocumentToDrive() never throws (it swallows and
+ * logs its own errors), so this function never throws either and never
+ * blocks or fails order creation.
+ *
+ * Local temp PDF files are deleted only after their own upload succeeds —
+ * if Drive isn't configured or an upload fails, the local file is left in
+ * place so /api/orders/:id/invoice and /api/orders/:id/label can keep
+ * serving it (and will lazily regenerate it if it's ever missing).
+ */
+async function uploadOrderDocumentsAndCleanup(
+  orderId: string,
+  invoicePath: string,
+  labelPath: string
+): Promise<void> {
+  const [invoiceResult, labelResult] = await Promise.all([
+    uploadOrderDocumentToDrive(invoicePath, 'invoice', orderId),
+    uploadOrderDocumentToDrive(labelPath, 'shipping-label', orderId),
+  ]);
+
+  const updates: {
+    invoiceDriveFileId?: string;
+    invoiceDriveFileUrl?: string;
+    labelDriveFileId?: string;
+    labelDriveFileUrl?: string;
+    driveFileId?: string;
+    driveFileUrl?: string;
+  } = {};
+
+  if (invoiceResult) {
+    updates.invoiceDriveFileId = invoiceResult.fileId;
+    updates.invoiceDriveFileUrl = invoiceResult.webViewLink;
+    console.log(`[GoogleDrive] Invoice uploaded for order ${orderId}: ${invoiceResult.webViewLink}`);
+    deleteLocalTempFile(invoicePath, orderId, 'invoice');
+  } else {
+    console.warn(`[GoogleDrive] Invoice upload skipped/failed for order ${orderId} (Drive not configured or upload error). Local file retained.`);
+  }
+
+  if (labelResult) {
+    updates.labelDriveFileId = labelResult.fileId;
+    updates.labelDriveFileUrl = labelResult.webViewLink;
+    // Keep the legacy single-file fields pointed at the shipping label, since
+    // that's what they represented before invoice upload tracking existed —
+    // preserves the existing /admin order detail API response shape.
+    updates.driveFileId = labelResult.fileId;
+    updates.driveFileUrl = labelResult.webViewLink;
+    console.log(`[GoogleDrive] Shipping label uploaded for order ${orderId}: ${labelResult.webViewLink}`);
+    deleteLocalTempFile(labelPath, orderId, 'shipping label');
+  } else {
+    console.warn(`[GoogleDrive] Shipping label upload skipped/failed for order ${orderId} (Drive not configured or upload error). Local file retained.`);
+  }
+
+  if (Object.keys(updates).length > 0) {
+    try {
+      dbObj.updateOrder(orderId, updates);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[GoogleDrive] Failed to persist Drive metadata for order ${orderId}:`, message);
+    }
+  }
+}
+
+/** Best-effort local temp file cleanup — logs but never throws on failure. */
+function deleteLocalTempFile(filePath: string, orderId: string, label: string): void {
+  fs.unlink(filePath, (err) => {
+    if (err) {
+      console.warn(`[GoogleDrive] Could not delete local ${label} temp file for order ${orderId} after upload:`, err.message);
+    }
+  });
+}
+
 // Health check — for Render / uptime monitors
 apiRouter.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -40,7 +113,19 @@ apiRouter.get('/health', (_req, res) => {
 
 // Google Drive integration smoke test — uploads a small test.txt file into
 // the "Godhara Labels/YYYY/Month" folder chain and returns its Drive URL.
-apiRouter.get('/test-drive', async (_req, res) => {
+//
+// Locked down per production security requirements:
+//   - In production (NODE_ENV === 'production') this endpoint is disabled
+//     entirely and always returns 404, regardless of auth.
+//   - In any other environment it still requires a fully authenticated,
+//     OTP-verified admin session (authenticateToken + requireAdmin), so it
+//     can never be hit anonymously even in staging/dev.
+apiRouter.get('/test-drive', (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ success: false, message: 'Not found' });
+  }
+  return authenticateToken(req, res, () => requireAdmin(req, res, next));
+}, async (_req, res) => {
   try {
     const result = await uploadDriveTestFile();
     if (!result) {
@@ -55,9 +140,10 @@ apiRouter.get('/test-drive', async (_req, res) => {
       fileId: result.fileId,
       url: result.webViewLink
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error('[test-drive] Error:', err);
-    res.status(500).json({ success: false, message: 'Google Drive test upload failed', error: err.message });
+    res.status(500).json({ success: false, message: 'Google Drive test upload failed', error: message });
   }
 });
 
@@ -2009,27 +2095,24 @@ apiRouter.post('/payment/verify', authenticateToken, async (req: AuthRequest, re
           labelPath
         });
 
-        // Upload the generated shipping label PDF to Google Drive
-        // (Godhara Labels/YYYY/Month). Best-effort — never blocks the order.
-        const driveResult = await uploadShippingLabelToDrive(labelPath, `Godhara-Label-${newOrder.id}.pdf`);
-        if (driveResult) {
-          dbObj.updateOrder(newOrder.id, {
-            driveFileId: driveResult.fileId,
-            driveFileUrl: driveResult.webViewLink
-          });
-          console.log(`[GoogleDrive] Shipping label uploaded for order ${newOrder.id}: ${driveResult.webViewLink}`);
-        } else {
-          console.warn(`[GoogleDrive] Shipping label upload skipped/failed for order ${newOrder.id} (Drive not configured or upload error).`);
-        }
-
-        // Email dispatch with Razorpay attachments to customer
+        // Email dispatch with Razorpay attachments to customer. Sent before the
+        // Drive upload/cleanup step below, since it needs invoicePath to still
+        // exist on disk as an attachment.
         await sendOrderConfirmationEmail(newOrder, invoicePath);
 
+        // Upload both generated PDFs to Google Drive (Godhara Labels/YYYY/Month)
+        // and remove the local temp files once each upload succeeds. Entirely
+        // best-effort — a Drive failure never blocks or fails the order, and
+        // local files are only removed after a confirmed successful upload
+        // (the /orders/:id/invoice and /orders/:id/label endpoints regenerate
+        // on demand if the local file is ever missing).
+        await uploadOrderDocumentsAndCleanup(newOrder.id, invoicePath, labelPath);
+
         // Alert administrators immediately of new traditional purchase
-     const settings = dbObj.getSettings();
-console.log('SETTINGS CONTACT EMAIL:', settings.contactEmail);
-const adminEmail = settings.contactEmail || 'godhara.2026@gmail.com';
-console.log('ADMIN EMAIL USED:', adminEmail);
+        const settings = dbObj.getSettings();
+        console.log('SETTINGS CONTACT EMAIL:', settings.contactEmail);
+        const adminEmail = settings.contactEmail || 'godhara.2026@gmail.com';
+        console.log('ADMIN EMAIL USED:', adminEmail);
 
       } catch (postErr: any) {
         console.error('Failure inside post-payment execution block:', postErr.message);
@@ -2088,20 +2171,19 @@ apiRouter.post('/orders', authenticateToken, async (req: AuthRequest, res) => {
 
         dbObj.updateOrder(newOrder.id, {
           invoiceUrl: relativeInvoice,
-          labelUrl: relativeLabel
+          labelUrl: relativeLabel,
+          invoicePath,
+          labelPath
         });
 
-        // Upload the generated shipping label PDF to Google Drive (best-effort)
-        const driveResult = await uploadShippingLabelToDrive(labelPath, `Godhara-Label-${newOrder.id}.pdf`);
-        if (driveResult) {
-          dbObj.updateOrder(newOrder.id, {
-            driveFileId: driveResult.fileId,
-            driveFileUrl: driveResult.webViewLink
-          });
-        }
-
-        // Async confirmation email with Brevo or fallback simulation
+        // Async confirmation email with Brevo or fallback simulation. Sent
+        // before the Drive upload/cleanup step, since it needs invoicePath to
+        // still exist on disk as an attachment.
         await sendOrderConfirmationEmail(newOrder, invoicePath);
+
+        // Upload both generated PDFs to Google Drive (best-effort, never blocks
+        // the order) and remove the local temp files after a confirmed upload.
+        await uploadOrderDocumentsAndCleanup(newOrder.id, invoicePath, labelPath);
       } catch (pdfErr) {
         console.error('Critical failure during post-order document workflows:', pdfErr);
       }
