@@ -71,7 +71,7 @@ export const PRODUCTS: StaticProduct[] = [
     price: 150.0,
     stock: 48,
     category: 'Personal Care',
-    images: ["https://res.cloudinary.com/dndugbffx/image/upload/v1784357204/godhara_products/cbffbwsled7tqa5s47a8.jpg"],
+    images: ["https://res.cloudinary.com/dndugbffx/image/upload/v1784738264/godhara_products/ilgt3tuku05syuvimjxz.jpg"],
     imagePublicIds: [],
     isFeatured: true,
     isActive: true,
