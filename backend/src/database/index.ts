@@ -182,6 +182,10 @@ export async function ensureSchema() {
         "trackingNumber"  TEXT DEFAULT '',
         "driveFileId"     TEXT DEFAULT '',
         "driveFileUrl"    TEXT DEFAULT '',
+        "invoiceDriveFileId" TEXT DEFAULT '',
+        "invoiceDriveFileUrl" TEXT DEFAULT '',
+        "labelDriveFileId"   TEXT DEFAULT '',
+        "labelDriveFileUrl"  TEXT DEFAULT '',
         "createdAt"       TIMESTAMP NOT NULL DEFAULT NOW(),
         "updatedAt"       TIMESTAMP NOT NULL DEFAULT NOW()
       );
@@ -331,6 +335,10 @@ export async function ensureSchema() {
     await client.query(`
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS "driveFileId"  TEXT DEFAULT '';
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS "driveFileUrl" TEXT DEFAULT '';
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS "invoiceDriveFileId"   TEXT DEFAULT '';
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS "invoiceDriveFileUrl"  TEXT DEFAULT '';
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS "labelDriveFileId"     TEXT DEFAULT '';
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS "labelDriveFileUrl"    TEXT DEFAULT '';
       ALTER TABLE settings ADD COLUMN IF NOT EXISTS "deliveryChargeTelangana" NUMERIC DEFAULT 70;
       ALTER TABLE settings ADD COLUMN IF NOT EXISTS "deliveryChargeAP"        NUMERIC DEFAULT 80;
       ALTER TABLE settings ADD COLUMN IF NOT EXISTS "deliveryChargeOther"     NUMERIC DEFAULT 100;
@@ -509,16 +517,22 @@ export async function pgUpsertOrder(o: any): Promise<void> {
   await pool.query(
     `INSERT INTO orders
        (id,"userId",items,subtotal,"shippingCharge",total,status,"paymentStatus",
-        "shippingAddress","invoiceUrl","labelUrl","trackingNumber","driveFileId","driveFileUrl","createdAt","updatedAt")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        "shippingAddress","invoiceUrl","labelUrl","trackingNumber","driveFileId","driveFileUrl",
+        "invoiceDriveFileId","invoiceDriveFileUrl","labelDriveFileId","labelDriveFileUrl",
+        "createdAt","updatedAt")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
      ON CONFLICT (id) DO UPDATE SET
        status=$7, "paymentStatus"=$8, "invoiceUrl"=$10,
-       "labelUrl"=$11, "trackingNumber"=$12, "driveFileId"=$13, "driveFileUrl"=$14, "updatedAt"=$16`,
+       "labelUrl"=$11, "trackingNumber"=$12, "driveFileId"=$13, "driveFileUrl"=$14,
+       "invoiceDriveFileId"=$15, "invoiceDriveFileUrl"=$16,
+       "labelDriveFileId"=$17, "labelDriveFileUrl"=$18, "updatedAt"=$20`,
     [
       o.id, o.userId, JSON.stringify(o.items ?? []), o.subtotal, o.shippingCharge,
       o.total, o.status, o.paymentStatus, JSON.stringify(o.shippingAddress ?? {}),
       o.invoiceUrl ?? '', o.labelUrl ?? '', o.trackingNumber ?? '',
       o.driveFileId ?? '', o.driveFileUrl ?? '',
+      o.invoiceDriveFileId ?? '', o.invoiceDriveFileUrl ?? '',
+      o.labelDriveFileId ?? '', o.labelDriveFileUrl ?? '',
       o.createdAt, o.updatedAt,
     ]
   );
@@ -1030,6 +1044,9 @@ export const dbObj = {
       paymentStatus: orderData.paymentStatus || 'PENDING',
       shippingAddress: orderData.shippingAddress,
       invoiceUrl: '', labelUrl: '', trackingNumber: '',
+      driveFileId: '', driveFileUrl: '',
+      invoiceDriveFileId: '', invoiceDriveFileUrl: '',
+      labelDriveFileId: '', labelDriveFileUrl: '',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     c.orders.unshift(newOrder); // newest first
