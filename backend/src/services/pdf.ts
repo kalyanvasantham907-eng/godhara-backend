@@ -38,33 +38,36 @@ async function generateBarcodeBuffer(text: string): Promise<Buffer> {
   });
 }
 
-// Helper to retrieve the official company brand logo image path
+// ======================================================================
+// Company logo loading.
+//
+// Single source of truth: only ever reads from process.cwd()/assets/logo.png
+// (the same file already served successfully at /assets/logo.png). No
+// fallback file is ever written to disk — if the logo is missing, callers
+// simply skip rendering it and fall back to their own placeholder layout.
+// ======================================================================
 function getCompanyLogoPath(): string | null {
-  const logoPaths = [
-    path.join(process.cwd(), 'public', 'logo.png'),
-    path.join(process.cwd(), 'assets', 'logo.png'),
-  ];
+  const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
+  console.log('[PDF] Logo path:', logoPath);
 
-  for (const logoPath of logoPaths) {
-    if (fs.existsSync(logoPath)) {
-      console.log(`[PDF Generator] Loaded company logo image from: ${logoPath}`);
-      return logoPath;
-    }
+  const exists = fs.existsSync(logoPath);
+  console.log('[PDF] Exists:', exists);
+
+  if (!exists) {
+    return null;
   }
 
-  console.warn('[PDF Generator] No company logo found.');
-  return null;
-}
-const defaultLogoPath = path.join(ASSETS_DIR, 'logo.png');
-
-if (!fs.existsSync(defaultLogoPath)) {
-  const defaultPngBase64 = '...';
   try {
-    fs.writeFileSync(defaultLogoPath, Buffer.from(defaultPngBase64, 'base64'));
-    console.log('[PDF Generator] Successfully initialized default company logo PNG under "assets/logo.png"');
+    if (!fs.statSync(logoPath).isFile()) {
+      console.warn('[PDF] Logo failed: path exists but is not a file:', logoPath);
+      return null;
+    }
   } catch (err) {
-    console.error('[PDF Generator] Failed to initialize default company logo file assets/logo.png:', err);
+    console.error('[PDF] Logo failed:', err);
+    return null;
   }
+
+  return logoPath;
 }
 
 const safe = (val: any, fallback = 'N/A') =>
@@ -367,43 +370,34 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
 
       // ================= 1. HEADER (compact) =================
       const logoSize = 30;
-  const logoPath = getCompanyLogoPath();
+      const logoPath = getCompanyLogoPath();
+      let logoRendered = false;
 
-if (logoPath) {
-  try {
-    console.log("Using logo:", logoPath);
+      if (logoPath) {
+        try {
+          console.log('[PDF] Loading logo...');
+          doc.image(logoPath, MARGIN, cursorY, {
+            fit: [logoSize, logoSize],
+            align: 'center',
+            valign: 'center',
+          });
+          logoRendered = true;
+          console.log('[PDF] Logo loaded successfully');
+        } catch (err) {
+          console.error('[PDF] Logo failed:', err);
+        }
+      }
 
-    doc.image(logoPath, MARGIN, cursorY, {
-      width: logoSize,
-      height: logoSize,
-      fit: [logoSize, logoSize],
-      align: 'center',
-      valign: 'center',
-    });
-
-    console.log("✅ Logo added successfully");
-  } catch (err) {
-    console.error("❌ Logo error:", err);
-
-    drawRoundedBox(MARGIN, cursorY, logoSize, logoSize, creamBg, goldLight, 6);
-    doc.font('Helvetica-Bold')
-      .fontSize(12)
-      .fillColor(primaryColor)
-      .text('G', MARGIN, cursorY + 9, {
-        width: logoSize,
-        align: 'center',
-      });
-  }
-} else {
-  drawRoundedBox(MARGIN, cursorY, logoSize, logoSize, creamBg, goldLight, 6);
-  doc.font('Helvetica-Bold')
-    .fontSize(12)
-    .fillColor(primaryColor)
-    .text('G', MARGIN, cursorY + 9, {
-      width: logoSize,
-      align: 'center',
-    });
-}
+      if (!logoRendered) {
+        drawRoundedBox(MARGIN, cursorY, logoSize, logoSize, creamBg, goldLight, 6);
+        doc.font('Helvetica-Bold')
+          .fontSize(12)
+          .fillColor(primaryColor)
+          .text('G', MARGIN, cursorY + 9, {
+            width: logoSize,
+            align: 'center',
+          });
+      }
 
       doc.font('Helvetica-Bold').fontSize(13).fillColor(primaryColor)
         .text('GODHARA', MARGIN + logoSize + 8, cursorY + 1);
