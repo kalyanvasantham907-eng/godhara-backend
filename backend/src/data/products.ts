@@ -331,7 +331,7 @@ export const PRODUCTS: StaticProduct[] = [
     price: 80.0,
     stock: 50,
     category: 'Personal Care',
-    images: ["https://res.cloudinary.com/dndugbffx/image/upload/v1785160838/WhatsApp_Image_2026-07-27_at_7.25.52_PM_v4r55k.jpg"],
+    images: ["https://res.cloudinary.com/dndugbffx/image/upload/v1785162849/WhatsApp_Image_2026-07-27_at_8.02.45_PM_wl6npp.jpg"],
     imagePublicIds: [],
     isFeatured: false,
     isActive: true,
