@@ -40,7 +40,7 @@ export interface StaticProduct {
 const SEED_TS = '2026-01-01T00:00:00.000Z';
 
 export const CATEGORIES: string[] = [
-  'Dairy Products',
+  'Household Products',
   'Personal Care',
   'Spiritual',
   'Ayurvedic Remedies',
@@ -140,7 +140,7 @@ export const PRODUCTS: StaticProduct[] = [
     price: 200.0,
     discountPrice: 100.0,
     stock: 37,
-    category: 'Dairy Products',
+    category: 'Household Products',
     images: ["https://res.cloudinary.com/dndugbffx/image/upload/v1783855537/godhara_products/xmsjehdzo5pkclxsz57v.jpg"],
     imagePublicIds: [],
     isFeatured: false,
@@ -303,6 +303,39 @@ export const PRODUCTS: StaticProduct[] = [
     isActive: true,
     packageSize: '',
     weight: 50,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
+  },
+  {
+    id: 'prod-1785160838001',
+    name: 'Amruthadhara Roll-on',
+    slug: 'amruthadhara-roll-on',
+    description:
+      'Amruthadhara Roll-on is a fast-acting Ayurvedic herbal roll-on formulated with natural essential oils to provide quick relief from headaches, nasal congestion, body pain, muscle aches, and motion sickness. Its compact roll-on design makes it easy to carry and apply anytime.\n\n' +
+      'Key Features:\n' +
+      '- Instant relief from headaches\n' +
+      '- Helps relieve cold and nasal congestion\n' +
+      '- Effective for body and muscle pain\n' +
+      '- Easy roll-on application\n' +
+      '- Made with Ayurvedic herbal ingredients\n' +
+      '- Travel-friendly and leak-proof bottle\n' +
+      '- Suitable for everyday use\n\n' +
+      'Directions for Use:\n' +
+      'Apply a small amount to the forehead, temples, neck, or affected area and gently massage. Inhale the soothing aroma for relief from congestion. Use as needed.\n\n' +
+      'Product Benefits:\n' +
+      '- Quick pain relief\n' +
+      '- Refreshing herbal aroma\n' +
+      '- Portable and convenient\n' +
+      '- Non-greasy formula\n' +
+      '- Suitable for home, office, and travel',
+    price: 80.0,
+    stock: 50,
+    category: 'Personal Care',
+    images: ["https://res.cloudinary.com/dndugbffx/image/upload/v1785160838/WhatsApp_Image_2026-07-27_at_7.25.52_PM_v4r55k.jpg"],
+    imagePublicIds: [],
+    isFeatured: false,
+    isActive: true,
+    packageSize: '10 ml',
     createdAt: SEED_TS,
     updatedAt: SEED_TS,
   },
