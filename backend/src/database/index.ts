@@ -347,6 +347,14 @@ export async function ensureSchema() {
       ALTER TABLE settings ADD COLUMN IF NOT EXISTS "storeServicePincodes"    TEXT    DEFAULT '[]';
     `);
 
+    // One-time data fix: "Dairy Products" category renamed to "Household Products".
+    // Safe to run on every boot — becomes a no-op once the row is renamed/removed.
+    await client.query(`
+      UPDATE categories SET name = 'Household Products' WHERE name = 'Dairy Products';
+      INSERT INTO categories (name) VALUES ('Household Products') ON CONFLICT DO NOTHING;
+      DELETE FROM categories WHERE name = 'Dairy Products';
+    `);
+
     console.log('[PostgreSQL] Schema verified ✅');
   } catch (err) {
     console.error('[PostgreSQL] Schema error:', err);
@@ -718,7 +726,7 @@ function buildSeedData(): any {
     ],
     products: getActiveProducts(), // static catalog — never seeded into Postgres
     orders: [], carts: [],
-    categories: ['Dairy Products', 'Personal Care', 'Spiritual', 'Ayurvedic Remedies'],
+    categories: ['Household Products', 'Personal Care', 'Spiritual', 'Ayurvedic Remedies'],
     coupons: [
       {
         id: 'coupon-1', code: 'GODHARA10', type: 'PERCENTAGE', value: 10,
