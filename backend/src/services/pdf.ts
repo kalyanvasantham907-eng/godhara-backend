@@ -41,33 +41,32 @@ async function generateBarcodeBuffer(text: string): Promise<Buffer> {
 // ======================================================================
 // Company logo loading.
 //
-// Single source of truth: only ever reads from process.cwd()/assets/logo.png
-// (the same file already served successfully at /assets/logo.png). No
-// fallback file is ever written to disk — if the logo is missing, callers
-// simply skip rendering it and fall back to their own placeholder layout.
+// Single source of truth: the Railway-hosted logo URL. PDFKit cannot draw
+// an image directly from an HTTPS URL, so the logo is downloaded here and
+// handed back as a Buffer for doc.image() to consume. Both
+// generateInvoicePDF() and generateShippingLabelPDF() share this exact
+// same helper, so there is only one place that knows how the logo is
+// fetched. Any download failure is logged and resolved as `null` — callers
+// are expected to fall back to a text-only header rather than let PDF
+// generation crash.
 // ======================================================================
-function getCompanyLogoPath(): string | null {
-  const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
-  console.log('[PDF] Logo path:', logoPath);
+const COMPANY_LOGO_URL = 'https://godhara-backend-production.up.railway.app/assets/logo.png';
 
-  const exists = fs.existsSync(logoPath);
-  console.log('[PDF] Exists:', exists);
-
-  if (!exists) {
-    return null;
-  }
-
+async function getCompanyLogoBuffer(): Promise<Buffer | null> {
   try {
-    if (!fs.statSync(logoPath).isFile()) {
-      console.warn('[PDF] Logo failed: path exists but is not a file:', logoPath);
+    const response = await fetch(COMPANY_LOGO_URL);
+
+    if (!response.ok) {
+      console.error(`[PDF] Logo download failed: HTTP ${response.status} ${response.statusText}`);
       return null;
     }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
   } catch (err) {
-    console.error('[PDF] Logo failed:', err);
+    console.error('[PDF] Logo download failed:', err instanceof Error ? err.message : err);
     return null;
   }
-
-  return logoPath;
 }
 
 const safe = (val: any, fallback = 'N/A') =>
@@ -81,6 +80,8 @@ const safe = (val: any, fallback = 'N/A') =>
 // itemised table, totals and footer — always lands on one page.
 // ======================================================================
 export async function generateInvoicePDF(order: any): Promise<string> {
+  const logoBuffer = await getCompanyLogoBuffer();
+
   return new Promise((resolve, reject) => {
     try {
       const destPath = getInvoicePath(order.id);
@@ -117,11 +118,26 @@ export async function generateInvoicePDF(order: any): Promise<string> {
       const rightColW = RIGHT - rightColX;
 
       let leftY = MARGIN;
-      doc.font('Helvetica-Bold').fontSize(15).fillColor('#111111').text('+', LEFT, leftY);
+      const invoiceLogoSize = 32;
+      const nameX = logoBuffer ? LEFT + invoiceLogoSize + 8 : LEFT;
+      const nameY = logoBuffer ? leftY + (invoiceLogoSize - 14) / 2 : leftY + 1;
+
+      if (logoBuffer) {
+        try {
+          doc.image(logoBuffer, LEFT, leftY, {
+            fit: [invoiceLogoSize, invoiceLogoSize],
+            align: 'center',
+            valign: 'center',
+          });
+        } catch (err) {
+          console.error('[PDF] Failed to render invoice logo image:', err instanceof Error ? err.message : err);
+        }
+      }
+
       doc.font('Helvetica-Bold').fontSize(14).fillColor('#111111')
-        .text('Godhara', LEFT + 14, leftY + 1, { width: 130 });
+        .text('Godhara', nameX, nameY, { width: 130 });
       doc.font('Helvetica').fontSize(6.3).fillColor(primaryColor)
-        .text('Gau Traditional Ayurvedic Products', LEFT, leftY + 20, { width: 140 });
+        .text('Gau Traditional Ayurvedic Products', LEFT, leftY + invoiceLogoSize + 4, { width: 140 });
 
       // -- "To..." block (customer) --
       let rY = MARGIN;
@@ -315,6 +331,8 @@ export async function generateInvoicePDF(order: any): Promise<string> {
 // wrapped lines never collide with the line that follows.
 // ======================================================================
 export async function generateShippingLabelPDF(order: any): Promise<string> {
+  const logoBuffer = await getCompanyLogoBuffer();
+
   return new Promise(async (resolve, reject) => {
     try {
       const destPath = getLabelPath(order.id);
@@ -369,22 +387,19 @@ export async function generateShippingLabelPDF(order: any): Promise<string> {
       let cursorY = MARGIN;
 
       // ================= 1. HEADER (compact) =================
-      const logoSize = 30;
-      const logoPath = getCompanyLogoPath();
+      const logoSize = 32;
       let logoRendered = false;
 
-      if (logoPath) {
+      if (logoBuffer) {
         try {
-          console.log('[PDF] Loading logo...');
-          doc.image(logoPath, MARGIN, cursorY, {
+          doc.image(logoBuffer, MARGIN, cursorY, {
             fit: [logoSize, logoSize],
             align: 'center',
             valign: 'center',
           });
           logoRendered = true;
-          console.log('[PDF] Logo loaded successfully');
         } catch (err) {
-          console.error('[PDF] Logo failed:', err);
+          console.error('[PDF] Failed to render shipping label logo image:', err instanceof Error ? err.message : err);
         }
       }
 
