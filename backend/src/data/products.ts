@@ -339,6 +339,23 @@ export const PRODUCTS: StaticProduct[] = [
     createdAt: SEED_TS,
     updatedAt: SEED_TS,
   },
+  {
+    id: 'prod-1785725114345',
+    name: 'Godhara Handmade Round Cotton Wicks',
+    slug: 'godhara-handmade-round-cotton-wicks',
+    description:
+      'Handcrafted from premium-quality cotton, Godhara Round Cotton Wicks provide a bright, steady, and clean-burning flame for daily pooja, aarti, diyas, and festive rituals. Designed for long-lasting performance with minimal smoke, they bring purity, tradition, and devotion to every prayer.',
+    price: 60.0,
+    stock: 50,
+    category: 'Spiritual',
+    images: ["https://res.cloudinary.com/dndugbffx/image/upload/v1785725054/godhara_bwgktx.jpg"],
+    imagePublicIds: [],
+    isFeatured: false,
+    isActive: true,
+    packageSize: '108 Pcs',
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
+  },
 ];
 
 export function getAllProducts(): StaticProduct[] {
