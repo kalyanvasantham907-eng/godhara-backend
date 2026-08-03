@@ -350,7 +350,7 @@ export const PRODUCTS: StaticProduct[] = [
     category: 'Spiritual',
     images: ["https://res.cloudinary.com/dndugbffx/image/upload/v1785725054/godhara_bwgktx.jpg"],
     imagePublicIds: [],
-    isFeatured: false,
+    isFeatured: true,
     isActive: true,
     packageSize: '108 Pcs',
     createdAt: SEED_TS,
