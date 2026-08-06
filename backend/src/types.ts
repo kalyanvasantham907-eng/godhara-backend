@@ -10,6 +10,10 @@ export interface Product {
   images: string[];
   isFeatured: boolean;
   isActive: boolean;
+  /** Manual admin-controlled availability override (In Stock / Out of Stock toggle),
+   * persisted in the `product_inventory` table. Defaults to true. Independent of the
+   * numeric `stock` count, which still drives low-stock alerts. */
+  inStock?: boolean;
   /** Customer-facing package size, e.g. "250 ml", "500 g", "12 pcs". Defaults to '' for legacy products. */
   packageSize: string;
   /** @deprecated Legacy physical weight in grams. No longer collected via admin UI; retained only as an
@@ -126,3 +130,4 @@ export interface CustomerHistory {
   totalOrders: number;
   totalSpent: number;
 }
+
