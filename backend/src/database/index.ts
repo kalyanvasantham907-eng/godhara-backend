@@ -129,6 +129,17 @@ function parseRow(row: any): any {
   return parseDateFields(parseNumericFields(row));
 }
 
+// Applies persisted manual in-stock/out-of-stock overrides onto the static
+// product catalog. A product with no row in `product_inventory` defaults to
+// inStock = true (matches pre-existing behaviour for the whole catalog).
+function applyInventoryOverrides(products: any[], invRows: any[]): any[] {
+  const invMap = new Map(invRows.map((r: any) => [r.id, r.inStock]));
+  return products.map((p: any) => ({
+    ...p,
+    inStock: invMap.has(p.id) ? invMap.get(p.id) : true,
+  }));
+}
+
 function parseSettings(s: any): any {
   s = parseNumericFields(s);
   for (const k of ['freeDeliveryPincodes','storeLocations','storeServicePincodes']) {
@@ -289,6 +300,16 @@ export async function ensureSchema() {
         CONSTRAINT "session_pkey" PRIMARY KEY ("sid")
       );
 
+      -- Per-product manual In Stock / Out of Stock override.
+      -- Products themselves stay a static in-code catalog (src/data/products.ts),
+      -- but the admin-controlled availability toggle IS persisted here so it
+      -- survives deploys/restarts. Absence of a row means "in stock" (default).
+      CREATE TABLE IF NOT EXISTS product_inventory (
+        id          VARCHAR(512) PRIMARY KEY,
+        "inStock"   BOOLEAN NOT NULL DEFAULT TRUE,
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+
       -- ─── INDEXES (covering + composite) ─────────────────────────
       -- Users hot paths
       CREATE INDEX IF NOT EXISTS idx_users_email          ON users(email);
@@ -371,7 +392,7 @@ export async function ensureSchema() {
 //       to reduce memory footprint. They are read on-demand directly from DB.
 export async function loadFromPostgres(): Promise<AppCache> {
   const empty = (): AppCache => ({
-    users: [], products: getActiveProducts(), orders: [], carts: [],
+    users: [], products: applyInventoryOverrides(getActiveProducts(), []), orders: [], carts: [],
     categories: getStaticCategories(), coupons: [], settings: defaultSettings(),
     email_verifications: [], password_resets: [],
     _loadedAt: Date.now(),
@@ -393,6 +414,7 @@ export async function loadFromPostgres(): Promise<AppCache> {
       resCoupons,
       resEV,
       resPR,
+      resInventory,
     ] = await Promise.all([
       pool.query('SELECT name FROM categories'),
       pool.query('SELECT * FROM settings WHERE id = $1', ['global']),
@@ -402,6 +424,7 @@ export async function loadFromPostgres(): Promise<AppCache> {
       pool.query('SELECT * FROM coupons'),
       pool.query('SELECT * FROM email_verifications WHERE "usedAt" IS NULL AND "expiresAt" > NOW()'),
       pool.query('SELECT * FROM password_resets    WHERE "usedAt" IS NULL AND "expiresAt" > NOW()'),
+      pool.query('SELECT id, "inStock" FROM product_inventory'),
     ]);
 
     CB.recordSuccess();
@@ -418,7 +441,7 @@ export async function loadFromPostgres(): Promise<AppCache> {
       categories:           dbCategories.length > 0 ? dbCategories : getStaticCategories(),
       settings:             resSettings.rows.length > 0 ? parseSettings({ ...resSettings.rows[0] }) : defaultSettings(),
       users:                resUsers.rows.map(parseRow),
-      products:             getActiveProducts(),
+      products:             applyInventoryOverrides(getActiveProducts(), resInventory.rows),
       orders:               resOrders.rows.map(parseRow),
       carts:                resCarts.rows.map(parseRow),
       coupons:              resCoupons.rows.map(parseRow),
@@ -451,10 +474,11 @@ export async function reloadCache(): Promise<void> {
         ? new Date(cache._loadedAt - 5000).toISOString() // 5s overlap buffer
         : new Date(0).toISOString();
 
-      const [resUsers, resOrders, resCoupons] = await Promise.all([
+      const [resUsers, resOrders, resCoupons, resInventory] = await Promise.all([
         pool.query('SELECT * FROM users    WHERE "updatedAt" > $1 AND "deletedAt" IS NULL', [since]),
         pool.query('SELECT * FROM orders   WHERE "updatedAt" > $1 ORDER BY "createdAt" DESC LIMIT 500', [since]),
         pool.query('SELECT * FROM coupons  WHERE TRUE'),   // small table, always full
+        pool.query('SELECT id, "inStock" FROM product_inventory'), // small table, always full
       ]);
 
       CB.recordSuccess();
@@ -469,7 +493,8 @@ export async function reloadCache(): Promise<void> {
         };
 
         cache.users    = mergeById(cache.users,    resUsers.rows);
-        cache.products = getActiveProducts(); // static catalog — never queried
+        // Static catalog, re-merged with the latest manual in-stock overrides.
+        cache.products = applyInventoryOverrides(getActiveProducts(), resInventory.rows);
         cache.orders   = mergeById(cache.orders,   resOrders.rows);
         cache.coupons  = resCoupons.rows.map(parseRow);
         cache._loadedAt = Date.now();
@@ -517,6 +542,16 @@ export async function pgUpsertUser(u: any): Promise<void> {
       !!u.isVerified, !!u.isBanned, u.deletedAt ?? null,
       JSON.stringify(u.passwordHistory ?? []), u.failedLoginAttempts ?? 0, u.lockUntil ?? null,
     ]
+  );
+}
+
+export async function pgUpsertProductInventory(productId: string, inStock: boolean): Promise<void> {
+  if (!isPostgresConnected) return;
+  await pool.query(
+    `INSERT INTO product_inventory (id, "inStock", "updatedAt")
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (id) DO UPDATE SET "inStock" = $2, "updatedAt" = NOW()`,
+    [productId, inStock]
   );
 }
 
@@ -959,7 +994,8 @@ export const dbObj = {
     return true;
   },
 
-  // ── PRODUCTS (static catalog — read-only, never stored in Postgres) ───────
+  // ── PRODUCTS (static catalog — read-only, except the manual in-stock flag,
+  //    which is persisted in the `product_inventory` Postgres table) ────────
   getProducts() {
     return getCache().products;
   },
@@ -968,6 +1004,16 @@ export const dbObj = {
   },
   findProductBySlug(slug: string) {
     return getCache().products.find((p: any) => p.slug === slug) ?? null;
+  },
+  async setProductStockStatus(id: string, inStock: boolean) {
+    const c = getCache();
+    const prod = c.products.find((p: any) => p.id === id);
+    if (!prod) return null;
+    prod.inStock = inStock;
+    prod.updatedAt = new Date().toISOString();
+    await pgUpsertProductInventory(id, inStock);
+    writeJsonFallback({});
+    return prod;
   },
 
   // ── CATEGORIES ────────────────────────────────────────────────────────────
