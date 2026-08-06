@@ -1888,6 +1888,28 @@ apiRouter.get('/products/:slug', (req, res) => {
   res.json(product);
 });
 
+// ── ADMIN: INVENTORY (In Stock / Out of Stock toggle) ─────────────────────
+// Manual per-product availability override, persisted in the
+// `product_inventory` Postgres table (separate from the numeric `stock`
+// count, which still tracks quantity for low-stock alerts).
+apiRouter.get('/admin/inventory', authenticateToken, requireAdmin, (req, res) => {
+  res.json(dbObj.getProducts());
+});
+
+apiRouter.patch('/admin/products/:id/stock-status', authenticateToken, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { inStock } = req.body;
+  if (typeof inStock !== 'boolean') {
+    return res.status(400).json({ message: '"inStock" must be a boolean.' });
+  }
+  const updated = await dbObj.setProductStockStatus(id, inStock);
+  if (!updated) {
+    return res.status(404).json({ message: 'Product not found' });
+  }
+  console.log(`[Inventory] Product ${id} marked ${inStock ? 'IN STOCK' : 'OUT OF STOCK'} by admin.`);
+  res.json(updated);
+});
+
 // ==========================================
 // 3. CART SYSTEM API
 // ==========================================
